@@ -6,7 +6,8 @@
 #include <WiFi.h>
 #include "IconBitmaps.h"
 // Implementation for setting WiFi status
-void DoorController::setWiFiConnected(bool connected) {
+void DoorController::setWiFiConnected(bool connected)
+{
   wifiConnected = connected;
   DisplayHelpers::setWiFiConnected(connected);
 }
@@ -16,8 +17,10 @@ void DoorController::setWiFiConnected(bool connected) {
 // -----------------------------------------------------------------------------
 DoorController::DoorController() {}
 
-DoorController::~DoorController() {
-  for (size_t i = 0; i < Config::numTOFSensors; ++i) {
+DoorController::~DoorController()
+{
+  for (size_t i = 0; i < Config::numTOFSensors; ++i)
+  {
     delete sensors[i];
     sensors[i] = nullptr;
   }
@@ -26,11 +29,9 @@ DoorController::~DoorController() {
 // -----------------------------------------------------------------------------
 // Public Interface
 // -----------------------------------------------------------------------------
-void DoorController::setup() {
+void DoorController::setup()
+{
   Serial.begin(Config::SerialBaudRate);
-  delay(Config::SetupDelayMs);
-
-  DisplayHelpers::showStatus(display, "DoorController Setup");
   Serial.printf("Setup Start\n");
 
   setupStepper();
@@ -39,7 +40,8 @@ void DoorController::setup() {
 
   setPixelColor(0, 0, 255);
 
-  while (!setupTOFSensors()) {
+  while (!setupTOFSensors())
+  {
     Serial.printf("Retrying VL53L0X sensor initialization...\n");
     DisplayHelpers::showStatus(display, "Retrying VL53L0X init");
     setPixelColor(0, 0, 0);
@@ -48,14 +50,12 @@ void DoorController::setup() {
     delay(Config::SetupDelayMs / 2);
   }
   Serial.printf("VL53L0X Sensors initialized successfully\n");
-
   DisplayHelpers::showStatus(display, "VL53L0X Sensors ready");
 
   setPixelColor(255, 0, 255); // Purple
 
   setupLimitSwitches();
   Serial.printf("Limit switches initialized\n");
-
   DisplayHelpers::showStatus(display, "Limit switches ready");
 
   Serial.printf("Setup END\n");
@@ -63,13 +63,16 @@ void DoorController::setup() {
   DisplayHelpers::showStatus(display, "Ready!", false, 2);
 }
 
-void DoorController::loop() {
-  for (auto& debouncer : limitSwitchDebouncers) {
+void DoorController::loop()
+{
+  for (auto &debouncer : limitSwitchDebouncers)
+  {
     debouncer.update();
   }
   // Periodically check WiFi status for icon (every wifiCheckIntervalMs)
   unsigned long now = millis();
-  if (now - lastWiFiCheckMs >= wifiCheckIntervalMs) {
+  if (now - lastWiFiCheckMs >= wifiCheckIntervalMs)
+  {
     wifiConnected = (WiFi.status() == WL_CONNECTED);
     DisplayHelpers::setWiFiConnected(wifiConnected);
     lastWiFiCheckMs = now;
@@ -77,79 +80,103 @@ void DoorController::loop() {
   updateSensorStates();
   handleState();
 
-  if (sensorInitNeeded) {
-    if (setupTOFSensors()) {
+  if (sensorInitNeeded)
+  {
+    if (setupTOFSensors())
+    {
       sensorInitNeeded = false;
     }
   }
 }
 
-void DoorController::setUMS3(UMS3* ums3Ptr) {
+void DoorController::setUMS3(UMS3 *ums3Ptr)
+{
   ums3 = ums3Ptr;
 }
 
-void DoorController::setDisplay(Adafruit_SSD1306* displayPtr) {
+void DoorController::setDisplay(Adafruit_SSD1306 *displayPtr)
+{
   display = displayPtr;
 }
 
-void DoorController::setPixelColor(uint8_t r, uint8_t g, uint8_t b) {
-  if (ums3) {
+void DoorController::setPixelColor(uint8_t r, uint8_t g, uint8_t b)
+{
+  if (ums3)
+  {
     ums3->setPixelColor(r, g, b);
   }
 }
 
-const char* DoorController::getStateString() const {
-  switch (state) {
-    case DoorState::Closed:   return "Closed";
-    case DoorState::Opening:  return "Opening";
-    case DoorState::Open:     return "Open";
-    case DoorState::Closing:  return "Closing";
-    default:                  return "Unknown";
+const char *DoorController::getStateString() const
+{
+  switch (state)
+  {
+  case DoorState::Closed:
+    return "Closed";
+  case DoorState::Opening:
+    return "Opening";
+  case DoorState::Open:
+    return "Open";
+  case DoorState::Closing:
+    return "Closing";
+  default:
+    return "Unknown";
   }
 }
 
 // -----------------------------------------------------------------------------
 // Hardware Setup
 // -----------------------------------------------------------------------------
-void DoorController::setupStepper() {
+void DoorController::setupStepper()
+{
   engine.init();
   stepper = engine.stepperConnectToPin(Config::stepPinStepper);
-  if (stepper) {
+  if (stepper)
+  {
     stepper->setDirectionPin(Config::dirPinStepper);
     stepper->setEnablePin(Config::enablePinStepper);
     stepper->setAutoEnable(true);
     stepper->setSpeedInHz(Config::stepsPerSecond);
     stepper->setAcceleration(Config::acceleration);
     stepper->setCurrentPosition(0);
-  } else {
+  }
+  else
+  {
     Serial.printf("Stepper initialization failed!\n");
     DisplayHelpers::showStatus(display, "ERROR: Stepper init failed!");
   }
 }
 
-bool DoorController::setupTOFSensors() {
+bool DoorController::setupTOFSensors()
+{
   Wire.begin(Config::SDA, Config::SCL, 400000);
   bool retVal = true;
-  for (size_t i = 0; i < Config::numTOFSensors; ++i) {
+  for (size_t i = 0; i < Config::numTOFSensors; ++i)
+  {
     pinMode(Config::xshutPins[i], OUTPUT);
     digitalWrite(Config::xshutPins[i], LOW);
   }
-  for (size_t i = 0; i < Config::numTOFSensors; ++i) {
+  for (size_t i = 0; i < Config::numTOFSensors; ++i)
+  {
     pinMode(Config::xshutPins[i], INPUT);
     delay(Config::SensorInitDelayMs);
-    if (sensors[i]) {
+    if (sensors[i])
+    {
       delete sensors[i];
       sensors[i] = nullptr;
     }
     sensors[i] = new VL53L0X();
     sensors[i]->setTimeout(Config::TOFSensorTimeout);
-    if (!sensors[i]->init()) {
+    if (!sensors[i]->init())
+    {
       Serial.printf("%s sensor failed to initialize!\n", Config::sensorNames[i]);
       char errorMsg[64];
       snprintf(errorMsg, sizeof(errorMsg), "ERROR:%s sensor failed!", Config::sensorNames[i]);
       DisplayHelpers::showStatus(display, errorMsg, true, 1);
       return false;
-    } else {
+    }
+    else
+    {
       sensors[i]->setAddress(Config::TOFSensorStartAddress + i);
       sensors[i]->startContinuous();
       Serial.printf("%s sensor initialized at address: 0x%X\n", Config::sensorNames[i], sensors[i]->getAddress());
@@ -162,7 +189,8 @@ bool DoorController::setupTOFSensors() {
   return retVal;
 }
 
-void DoorController::setupLimitSwitches() {
+void DoorController::setupLimitSwitches()
+{
   pinMode(Config::limitSwitchPins[BottomLimitSwitch], INPUT_PULLDOWN);
   limitSwitchDebouncers[BottomLimitSwitch].attach(Config::limitSwitchPins[BottomLimitSwitch]);
   limitSwitchDebouncers[BottomLimitSwitch].interval(Config::DebounceIntervalMs);
@@ -175,22 +203,30 @@ void DoorController::setupLimitSwitches() {
 // -----------------------------------------------------------------------------
 // Sensor Helpers
 // -----------------------------------------------------------------------------
-void DoorController::updateSensorStates() {
+void DoorController::updateSensorStates()
+{
   openDoor = false;
-  for (size_t i = 0; i < Config::numTOFSensors; ++i) {
+  for (size_t i = 0; i < Config::numTOFSensors; ++i)
+  {
     range[i] = sensors[i]->readRangeContinuousMillimeters();
-    if (sensors[i]->timeoutOccurred()) {
+    if (sensors[i]->timeoutOccurred())
+    {
       Serial.printf("%s sensor timeout, skipping...\n", Config::sensorNames[i]);
       continue;
-    } else if (range[i] == 0) {
+    }
+    else if (range[i] == 0)
+    {
       Serial.printf("%s sensor failed to read, skipping...\n", Config::sensorNames[i]);
       continue;
-    } else if (range[i] == Config::TOFSensorErrorValue) {
+    }
+    else if (range[i] == Config::TOFSensorErrorValue)
+    {
       Serial.printf("%s sensor not found, scheduling re-initialization...\n", Config::sensorNames[i]);
       sensorInitNeeded = true;
       continue;
     }
-    if (range[i] < Config::rangeThreshold[i]) {
+    if (range[i] < Config::rangeThreshold[i])
+    {
       openDoor = true;
       lastSensorTriggered = (i == 0) ? 1 : 2; // 1 = indoor, 2 = outdoor
       DisplayHelpers::setLastSensorTriggered(lastSensorTriggered);
@@ -202,23 +238,26 @@ void DoorController::updateSensorStates() {
 // -----------------------------------------------------------------------------
 // State Machine and Handlers
 // -----------------------------------------------------------------------------
-void DoorController::handleState() {
+void DoorController::handleState()
+{
 
-  switch (state) {
-    case DoorState::Closed:
-      handleClosedState();
-      break;
-    case DoorState::Opening:
-      handleOpeningState();
-      break;
-    case DoorState::Open:
-      handleOpenState();
-      break;
-    case DoorState::Closing:
-      handleClosingState();
-      break;
+  switch (state)
+  {
+  case DoorState::Closed:
+    handleClosedState();
+    break;
+  case DoorState::Opening:
+    handleOpeningState();
+    break;
+  case DoorState::Open:
+    handleOpenState();
+    break;
+  case DoorState::Closing:
+    handleClosingState();
+    break;
   }
-  if (last_state != state) {
+  if (last_state != state)
+  {
     char stateMsg[64];
     snprintf(stateMsg, sizeof(stateMsg), "%s", getStateString());
     DisplayHelpers::showStatus(display, stateMsg, false, 2);
@@ -227,8 +266,10 @@ void DoorController::handleState() {
 }
 
 // --- State Handlers ---
-void DoorController::handleClosedState() {
-  if (openDoor && stepper) {
+void DoorController::handleClosedState()
+{
+  if (openDoor && stepper)
+  {
     Serial.printf("Opening door\n");
     state = DoorState::Opening;
     stepper->enableOutputs();
@@ -236,18 +277,22 @@ void DoorController::handleClosedState() {
   }
 }
 
-void DoorController::handleOpeningState() {
+void DoorController::handleOpeningState()
+{
   static bool seekTopMsgShown = false;
-  if (stepper) {
-    if (isLimitSwitchPressed(TopLimitSwitch)) {
+  if (stepper)
+  {
+    if (isLimitSwitchPressed(TopLimitSwitch))
+    {
       expectedDoorOpenPosition = stepper->getCurrentPosition();
       Serial.printf("Top limit switch hit during opening, updating expectedDoorOpenPosition to %u\n", expectedDoorOpenPosition);
       state = DoorState::Open;
       openStateFirstEntry = true; // Reset for Open state
-      seekTopMsgShown = false; // Reset flag after switch is hit
+      seekTopMsgShown = false;    // Reset flag after switch is hit
       return;
     }
-    if (!seekTopMsgShown) {
+    if (!seekTopMsgShown)
+    {
       DisplayHelpers::showStatus(display, "Seek top limit", true, 1);
       seekTopMsgShown = true;
     }
@@ -256,16 +301,20 @@ void DoorController::handleOpeningState() {
   }
 }
 
-void DoorController::handleOpenState() {
+void DoorController::handleOpenState()
+{
   // Record the time when entering Open state
-  if (openStateFirstEntry) {
+  if (openStateFirstEntry)
+  {
     openStateEnteredMs = millis();
     openStateFirstEntry = false;
     Serial.printf("Entered Open state, starting hold timer.\n");
   }
   // Wait for the configured hold time before closing
-  if (millis() - openStateEnteredMs >= Config::doorOpenHoldMs) {
-    if (isLimitSwitchPressed(TopLimitSwitch) && stepper) {
+  if (millis() - openStateEnteredMs >= Config::doorOpenHoldMs)
+  {
+    if (isLimitSwitchPressed(TopLimitSwitch) && stepper)
+    {
       expectedDoorOpenPosition = stepper->getCurrentPosition();
       Serial.printf("Top limit switch hit, updating expectedDoorOpenPosition to %u\n", expectedDoorOpenPosition);
       state = DoorState::Closing;
@@ -275,10 +324,13 @@ void DoorController::handleOpenState() {
   }
 }
 
-void DoorController::handleClosingState() {
+void DoorController::handleClosingState()
+{
   static bool seekBottomMsgShown = false;
-  if (stepper) {
-    if (isLimitSwitchPressed(BottomLimitSwitch)) {
+  if (stepper)
+  {
+    if (isLimitSwitchPressed(BottomLimitSwitch))
+    {
       stepper->setCurrentPosition(0);
       stepper->disableOutputs();
       Serial.printf("Bottom limit switch hit, stepper position set to 0. Door closed.\n");
@@ -286,14 +338,16 @@ void DoorController::handleClosingState() {
       seekBottomMsgShown = false; // Reset flag after switch is hit
       return;
     }
-    if (!seekBottomMsgShown) {
+    if (!seekBottomMsgShown)
+    {
       DisplayHelpers::showStatus(display, "Seek bottom limit", true, 1);
       seekBottomMsgShown = true;
     }
     seekLimitSwitch(-1, Config::seekIncrementSteps);
     return;
   }
-  if (openDoor) {
+  if (openDoor)
+  {
     Serial.printf("Reopening door\n");
     state = DoorState::Closed;
   }
@@ -302,14 +356,15 @@ void DoorController::handleClosingState() {
 // -----------------------------------------------------------------------------
 // Utility Methods
 // -----------------------------------------------------------------------------
-bool DoorController::isLimitSwitchPressed(LimitSwitch sw) {
+bool DoorController::isLimitSwitchPressed(LimitSwitch sw)
+{
   return limitSwitchDebouncers[sw].read() == HIGH;
 }
 
-
-
-void DoorController::seekLimitSwitch(int direction, int steps) {
-  if (stepper && !stepper->isRunning()) {
+void DoorController::seekLimitSwitch(int direction, int steps)
+{
+  if (stepper && !stepper->isRunning())
+  {
     stepper->move(direction * steps, true);
   }
 }

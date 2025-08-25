@@ -3,7 +3,8 @@
 
 #include <array>
 
-namespace Config {
+namespace Config
+{
   // --- Limit Switches ---
   constexpr size_t numLimitSwitches = 2;
   constexpr std::array<uint8_t, numLimitSwitches> limitSwitchPins = {1, 2};
@@ -17,7 +18,7 @@ namespace Config {
   constexpr uint16_t TOFSensorTimeout = 500;
   constexpr uint32_t TOFSensorTimingBudget = 100000;
   constexpr uint8_t TOFSensorStartAddress = 0x2A;
-  constexpr std::array<const char*, numTOFSensors> sensorNames = {"Indoor", "Outdoor"};
+  constexpr std::array<const char *, numTOFSensors> sensorNames = {"Indoor", "Outdoor"};
   constexpr uint16_t TOFSensorErrorValue = 65535;
 
   // --- Stepper Motor ---
@@ -40,7 +41,8 @@ namespace Config {
 }
 
 // --- Door State Enum ---
-enum class DoorState {
+enum class DoorState
+{
   Closed,
   Opening,
   Open,
@@ -48,13 +50,15 @@ enum class DoorState {
 };
 
 // --- Limit Switch Enum ---
-enum LimitSwitch {
+enum LimitSwitch
+{
   BottomLimitSwitch = 0,
   TopLimitSwitch = 1
 };
 
 // --- VL53L0X Sensor Enum ---
-enum TOFSensor {
+enum TOFSensor
+{
   IndoorSensor = 0,
   OutdoorSensor = 1
 };
