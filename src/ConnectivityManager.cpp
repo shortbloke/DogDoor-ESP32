@@ -89,6 +89,10 @@ void ConnectivityManager::handleConnected()
     showStatus("OTA Ready");
     otaReady = true;
   }
+  if (door)
+  {
+    door->refreshStateDisplay();
+  }
 }
 
 void ConnectivityManager::handleDisconnected()

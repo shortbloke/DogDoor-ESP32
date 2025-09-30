@@ -31,6 +31,8 @@ public:
   float getDistanceIndoorCm() const;
   float getDistanceOutdoorCm() const;
 
+  void refreshStateDisplay();
+
   // Returns debounced state of the given limit switch.
   bool isLimitSwitchPressed(LimitSwitch sw);
 

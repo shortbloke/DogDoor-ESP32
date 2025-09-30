@@ -67,7 +67,7 @@ void DoorController::setup()
 
   SERIAL_PRINT("Setup END\n");
 
-  showStateOnDisplay();
+  refreshStateDisplay();
 }
 
 void DoorController::loop()
@@ -134,6 +134,11 @@ void DoorController::setPixelColor(uint8_t r, uint8_t g, uint8_t b)
   {
     ums3->setPixelColor(r, g, b);
   }
+}
+
+void DoorController::refreshStateDisplay()
+{
+  showStateOnDisplay();
 }
 
 const char* DoorController::getStateString() const {

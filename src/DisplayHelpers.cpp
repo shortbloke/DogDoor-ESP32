@@ -84,7 +84,6 @@ void DisplayHelpers::drawStatusIcons(Adafruit_SSD1306 *display)
         display->drawBitmap(iconX, iconY, IconBitmaps::out_icon, IconBitmaps::iconWidth, IconBitmaps::iconHeight, SSD1306_WHITE);
     }
     iconX += IconBitmaps::iconWidth + 2;
-    iconX += IconBitmaps::iconWidth + 2;
     if (wifiConnected)
     {
         // print the ip address
