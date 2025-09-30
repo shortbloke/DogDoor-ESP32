@@ -9,14 +9,17 @@ namespace Config
   constexpr size_t numLimitSwitches = 2;
   constexpr std::array<uint8_t, numLimitSwitches> limitSwitchPins = {1, 2};
 
+  // --- GPIO pins for override switches ---
+  constexpr uint8_t overrideKeepOpenSwitchPin = 3;
+  constexpr uint8_t overrideKeepClosedSwitchPin = 4;
+
   // --- VL53L0X Time-of-Flight Sensors ---
   constexpr size_t numTOFSensors = 2;
   constexpr std::array<uint8_t, numTOFSensors> xshutPins = {7, 6};
   constexpr uint8_t SDA = 8;
   constexpr uint8_t SCL = 9;
-  constexpr std::array<uint16_t, numTOFSensors> rangeThreshold = {100, 100};
+  constexpr std::array<uint16_t, numTOFSensors> rangeThreshold = {600, 300};
   constexpr uint16_t TOFSensorTimeout = 500;
-  constexpr uint32_t TOFSensorTimingBudget = 100000;
   constexpr uint8_t TOFSensorStartAddress = 0x2A;
   constexpr std::array<const char *, numTOFSensors> sensorNames = {"Indoor", "Outdoor"};
   constexpr uint16_t TOFSensorErrorValue = 65535;
@@ -25,10 +28,10 @@ namespace Config
   constexpr uint8_t dirPinStepper = 41;
   constexpr uint8_t enablePinStepper = 42;
   constexpr uint8_t stepPinStepper = 40;
-  constexpr uint32_t stepsPerSecond = 200000;
-  constexpr uint32_t acceleration = 100000;
-  constexpr uint16_t expectedDoorClosePosition = 0;
-  constexpr uint16_t seekIncrementSteps = 100;
+  constexpr int32_t stepsPerSecond = 17500;
+  constexpr int32_t acceleration = 17500;
+  constexpr int32_t expectedDoorClosePosition = 0;
+  constexpr int32_t seekIncrementSteps = 10;
 
   // --- Misc ---
   constexpr unsigned long SerialBaudRate = 115200;
@@ -37,7 +40,7 @@ namespace Config
   constexpr int SetupDelayMs = 2000;
 
   // --- Door Control ---
-  static constexpr unsigned long doorOpenHoldMs = 10000; // 10 seconds
+  static constexpr unsigned long doorOpenHoldMs = 5000; // 5 seconds
 }
 
 // --- Door State Enum ---

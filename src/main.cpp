@@ -7,6 +7,7 @@
 #include <Adafruit_SSD1306.h>
 #include "Secrets.h"
 #include "DisplayHelpers.h"
+#include "mqtt.h"
 
 #define SCREEN_WIDTH 128    // OLED display width, in pixels
 #define SCREEN_HEIGHT 32    // OLED display height, in pixels
@@ -67,14 +68,22 @@ void setup()
 
   ums3.setPixelColor(255, 0, 0); // Set the pixel color to red
 
-  door.setWiFiConnected(wifi_connected); // Update WiFi icon status for display
-  door.setup();                          // Setup Door Controller
+  door.setWiFiConnected(wifi_connected);
+  door.setup();
 
-  ums3.setPixelColor(0, 255, 0); // Set the pixel to Green at end of Setup
+  if (wifi_connected) {
+    mqttSetup();  // Initialize MQTT after WiFi + door
+  }
+
+  // Optional: change distance publish interval (e.g. 60s)
+  // mqttSetDistancePublishInterval(60000);
+
+  ums3.setPixelColor(0, 255, 0);
 }
 
 void loop()
 {
-  ArduinoOTA.handle(); // Handle OTA updates
+  ArduinoOTA.handle();
   door.loop();
+  mqttLoop();
 }
