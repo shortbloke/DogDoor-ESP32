@@ -56,6 +56,7 @@ private:
   void updateSensorStates();
   void checkOverrideSwitches();
   void handleState();
+  void showStateOnDisplay();
 
   // State machine handlers
   void handleClosedState();
@@ -72,7 +73,8 @@ private:
   FastAccelStepper *stepper = nullptr;
 
   // --- Sensors and switches ---
-  std::array<VL53L0X *, Config::numTOFSensors> sensors{{nullptr, nullptr}};
+  std::array<VL53L0X, Config::numTOFSensors> sensors;
+  std::array<bool, Config::numTOFSensors> sensorReady{{false, false}};
   std::array<uint16_t, Config::numTOFSensors> range{{0, 0}};
   std::array<Bounce, Config::numLimitSwitches> limitSwitchDebouncers;
 

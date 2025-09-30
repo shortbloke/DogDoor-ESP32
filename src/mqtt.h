@@ -1,7 +1,8 @@
 #pragma once
 #include <Arduino.h>
+#include "DoorTelemetryProvider.h"
 
-void mqttSetup();
+void mqttSetup(DoorTelemetryProvider *provider);
 void mqttLoop();
 
 void mqttPublishDoorState(const char* state);

@@ -2,10 +2,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include "Secrets.h"
-#include "DoorController.h"
 #include "DisplayHelpers.h"
-
-extern DoorController door;   // Declared in main.cpp
 
 // Serial debug print macro matches DoorController.cpp usage.
 #ifdef SERIAL_PRINT_ENABLE
@@ -42,11 +39,13 @@ static const char* DISCOVERY_SENSOR_TRIGGER_CFG = "homeassistant/sensor/dogdoor/
 // ---------- Internal State ----------
 static WiFiClient wifiClient;
 static PubSubClient mqttClient(wifiClient);
+static DoorTelemetryProvider *telemetry = nullptr;
 
 static bool discoveryPublished = false;
 static String lastDoorState = "";
 static unsigned long lastDistancePublish = 0;
 static uint32_t distancePublishIntervalMs = 30000; // default 30s
+static uint8_t lastSensorTriggerPublished = 0;
 
 // ---------- Helpers ----------
 static bool publishRetained(const char* topic, const String& payload) {
@@ -240,8 +239,9 @@ static void publishDiscovery() {
 }
 
 static void publishAllDistances() {
-  mqttPublishDistanceIndoor(door.getDistanceIndoorCm());
-  mqttPublishDistanceOutdoor(door.getDistanceOutdoorCm());
+  if (!telemetry) return;
+  mqttPublishDistanceIndoor(telemetry->getDistanceIndoorCm());
+  mqttPublishDistanceOutdoor(telemetry->getDistanceOutdoorCm());
 }
 
 static void mqttReconnect() {
@@ -261,13 +261,17 @@ static void mqttReconnect() {
 
       if (!discoveryPublished) publishDiscovery();
 
-      const char* st = door.getStateString();
+      const char* st = telemetry ? telemetry->getDoorStateString() : nullptr;
+      uint8_t triggerId = telemetry ? telemetry->getLastSensorTriggered() : 0;
       mqttPublishDoorState(st);
       publishAllDistances();
-      mqttPublishLimitSwitchBottom(!door.isLimitSwitchPressed(BottomLimitSwitch));
-      mqttPublishLimitSwitchTop(!door.isLimitSwitchPressed(TopLimitSwitch));
-      mqttPublishSensorTrigger(door.getLastSensorTriggered());
+      if (telemetry) {
+        mqttPublishLimitSwitchBottom(!telemetry->isLimitSwitchPressed(BottomLimitSwitch));
+        mqttPublishLimitSwitchTop(!telemetry->isLimitSwitchPressed(TopLimitSwitch));
+        mqttPublishSensorTrigger(triggerId);
+      }
       lastDoorState = st ? st : "";
+      lastSensorTriggerPublished = triggerId;
       lastDistancePublish = millis();
     } else {
       SERIAL_PRINT("[MQTT] Connect failed rc=%d\n", mqttClient.state());
@@ -277,7 +281,11 @@ static void mqttReconnect() {
 }
 
 // ---------- Public API ----------
-void mqttSetup() {
+void mqttSetup(DoorTelemetryProvider *provider) {
+  telemetry = provider;
+  discoveryPublished = false;
+  lastDoorState = "";
+  lastSensorTriggerPublished = telemetry ? telemetry->getLastSensorTriggered() : 0;
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setBufferSize(512);
 }
@@ -290,12 +298,20 @@ void mqttLoop() {
   mqttClient.loop();
 
   // Door state change detection (polling)
-  const char* current = door.getStateString();
+  const char* current = telemetry ? telemetry->getDoorStateString() : nullptr;
   String cur = current ? current : "";
   if (cur != lastDoorState) {
     mqttPublishDoorState(cur.c_str());
     publishAllDistances(); // snapshot at transition
     lastDoorState = cur;
+  }
+
+  if (telemetry) {
+    uint8_t triggerId = telemetry->getLastSensorTriggered();
+    if (triggerId != lastSensorTriggerPublished) {
+      mqttPublishSensorTrigger(triggerId);
+      lastSensorTriggerPublished = triggerId;
+    }
   }
   // Periodic distance publish
   unsigned long now = millis();

@@ -24,14 +24,7 @@ void DoorController::setWiFiConnected(bool connected)
 // -----------------------------------------------------------------------------
 DoorController::DoorController() {}
 
-DoorController::~DoorController()
-{
-  for (size_t i = 0; i < Config::numTOFSensors; ++i)
-  {
-    delete sensors[i];
-    sensors[i] = nullptr;
-  }
-}
+DoorController::~DoorController() = default;
 
 // -----------------------------------------------------------------------------
 // Public Interface
@@ -74,9 +67,7 @@ void DoorController::setup()
 
   SERIAL_PRINT("Setup END\n");
 
-  char stateMsg[64];
-  snprintf(stateMsg, sizeof(stateMsg), "%s", getStateString());
-  DisplayHelpers::showStatus(display, stateMsg, false, 2);
+  showStateOnDisplay();
 }
 
 void DoorController::loop()
@@ -204,19 +195,15 @@ bool DoorController::setupTOFSensors()
   {
     pinMode(Config::xshutPins[i], OUTPUT);
     digitalWrite(Config::xshutPins[i], LOW);
+    sensorReady[i] = false;
   }
   for (size_t i = 0; i < Config::numTOFSensors; ++i)
   {
     pinMode(Config::xshutPins[i], INPUT);
     delay(Config::SensorInitDelayMs);
-    if (sensors[i])
-    {
-      delete sensors[i];
-      sensors[i] = nullptr;
-    }
-    sensors[i] = new VL53L0X();
-    sensors[i]->setTimeout(Config::TOFSensorTimeout);
-    if (!sensors[i]->init())
+    auto &sensor = sensors[i];
+    sensor.setTimeout(Config::TOFSensorTimeout);
+    if (!sensor.init())
     {
       SERIAL_PRINT("%s sensor failed to initialize!\n", Config::sensorNames[i]);
       char errorMsg[64];
@@ -226,12 +213,13 @@ bool DoorController::setupTOFSensors()
     }
     else
     {
-      sensors[i]->setAddress(Config::TOFSensorStartAddress + i);
-      sensors[i]->startContinuous();
-      SERIAL_PRINT("%s sensor initialized at address: 0x%X\n", Config::sensorNames[i], sensors[i]->getAddress());
+      sensor.setAddress(Config::TOFSensorStartAddress + i);
+      sensor.startContinuous();
+      SERIAL_PRINT("%s sensor initialized at address: 0x%X\n", Config::sensorNames[i], sensor.getAddress());
       char statusMsg[64];
-      snprintf(statusMsg, sizeof(statusMsg), "%s sensor at 0x%X", Config::sensorNames[i], sensors[i]->getAddress());
+      snprintf(statusMsg, sizeof(statusMsg), "%s sensor at 0x%X", Config::sensorNames[i], sensor.getAddress());
       DisplayHelpers::showStatus(display, statusMsg);
+      sensorReady[i] = true;
     }
   }
   SERIAL_PRINT("VL53L0X sensors initialized\n");
@@ -257,15 +245,21 @@ void DoorController::updateSensorStates()
   openDoor = false;
   for (size_t i = 0; i < Config::numTOFSensors; ++i)
   {
-    range[i] = sensors[i]->readRangeContinuousMillimeters();
-    if (sensors[i]->timeoutOccurred())
+    if (!sensorReady[i])
+    {
+      continue;
+    }
+
+    auto &sensor = sensors[i];
+    range[i] = sensor.readRangeContinuousMillimeters();
+    if (sensor.timeoutOccurred())
     {
       SERIAL_PRINT("%s sensor timeout, skipping...\n", Config::sensorNames[i]);
       continue;
     }
-    else if (sensors[i]->last_status != 0)
+    else if (sensor.last_status != 0)
     {
-      SERIAL_PRINT("%s sensor error %d, skipping...\n", Config::sensorNames[i], sensors[i]->last_status);
+      SERIAL_PRINT("%s sensor error %d, skipping...\n", Config::sensorNames[i], sensor.last_status);
       continue;
     }
     else if (range[i] == 0)
@@ -277,6 +271,7 @@ void DoorController::updateSensorStates()
     {
       SERIAL_PRINT("%s sensor not found, scheduling re-initialization...\n", Config::sensorNames[i]);
       sensorInitNeeded = true;
+      sensorReady[i] = false;
       continue;
     }
     // Check if the reading is below the threshold to trigger door opening
@@ -286,16 +281,6 @@ void DoorController::updateSensorStates()
       lastSensorTriggered = (i == 0) ? 1 : 2; // 1 = indoor, 2 = outdoor
       DisplayHelpers::setLastSensorTriggered(lastSensorTriggered);
       SERIAL_PRINT("%s sensor detected an object at %d mm\n", Config::sensorNames[i], range[i]);
-      float cm = range[i] / 10.0f;
-      if (i == 0)
-      {
-        mqttPublishDistanceIndoor(cm);
-      }
-      else
-      {
-        mqttPublishDistanceOutdoor(cm);
-      }
-      mqttPublishSensorTrigger(lastSensorTriggered);
     }
   }
 }
@@ -327,17 +312,13 @@ void DoorController::checkOverrideSwitches() {
     if (digitalRead(Config::overrideKeepClosedSwitchPin) == HIGH && !keepClosed) {
       openDoor = false; // Ensure door stays closed
       keepClosed = true;
-      char stateMsg[64];
-      snprintf(stateMsg, sizeof(stateMsg), "%s", getStateString());
-      DisplayHelpers::showStatus(display, stateMsg, false, 2);
+      showStateOnDisplay();
       SERIAL_PRINT("Override keep closed switch activated. Door will remain closed.\n");
     }
     if (digitalRead(Config::overrideKeepClosedSwitchPin) == LOW && keepClosed) {
       keepClosed = false;
       handleState(); // Re-evaluate state to possibly open door
-      char stateMsg[64];
-      snprintf(stateMsg, sizeof(stateMsg), "%s", getStateString());
-      DisplayHelpers::showStatus(display, stateMsg, false, 2);
+      showStateOnDisplay();
       SERIAL_PRINT("Override keep closed switch deactivated. Resuming normal operation.\n");
     }
 }
@@ -362,9 +343,7 @@ void DoorController::handleState()
 
     if (last_state != state)
     {
-        char stateMsg[64];
-        snprintf(stateMsg, sizeof(stateMsg), "%s", getStateString());
-        DisplayHelpers::showStatus(display, stateMsg, false, 2);
+        showStateOnDisplay();
     }
     last_state = state;
 }
@@ -487,6 +466,17 @@ void DoorController::handleClosingState()
 // -----------------------------------------------------------------------------
 // Utility Methods
 // -----------------------------------------------------------------------------
+void DoorController::showStateOnDisplay()
+{
+  if (!display)
+  {
+    return;
+  }
+  char stateMsg[64];
+  snprintf(stateMsg, sizeof(stateMsg), "%s", getStateString());
+  DisplayHelpers::showStatus(display, stateMsg, false, 2);
+}
+
 bool DoorController::isLimitSwitchPressed(LimitSwitch sw)
 {
   return limitSwitchDebouncers[sw].read() == HIGH;

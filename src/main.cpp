@@ -2,12 +2,14 @@
 #include "DoorController.h"
 #include <UMS3.h>
 #include <WiFi.h>
-#include <ArduinoOTA.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "Secrets.h"
 #include "DisplayHelpers.h"
+#include "DoorTelemetryProvider.h"
 #include "mqtt.h"
+#include "ConnectivityManager.h"
+#include <ArduinoOTA.h>
 
 #define SCREEN_WIDTH 128    // OLED display width, in pixels
 #define SCREEN_HEIGHT 32    // OLED display height, in pixels
@@ -16,6 +18,24 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire);
 
 UMS3 ums3;
 DoorController door;
+ConnectivityManager connectivity;
+
+class DoorControllerTelemetry final : public DoorTelemetryProvider
+{
+public:
+  explicit DoorControllerTelemetry(DoorController &controller) : door(controller) {}
+
+  const char *getDoorStateString() const override { return door.getStateString(); }
+  float getDistanceIndoorCm() const override { return door.getDistanceIndoorCm(); }
+  float getDistanceOutdoorCm() const override { return door.getDistanceOutdoorCm(); }
+  bool isLimitSwitchPressed(LimitSwitch sw) const override { return door.isLimitSwitchPressed(sw); }
+  uint8_t getLastSensorTriggered() const override { return door.getLastSensorTriggered(); }
+
+private:
+  DoorController &door;
+};
+
+DoorControllerTelemetry doorTelemetry(door);
 
 void setup()
 {
@@ -33,47 +53,12 @@ void setup()
 
   ums3.setPixelColor(255, 255, 0); // Yellow during WiFi connection
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD); // Connect to WiFi
-  int wifi_attempts = 0;
-  bool wifi_connected = false;
-  while (WiFi.status() != WL_CONNECTED && wifi_attempts < 20)
-  {
-    delay(500);
-    wifi_attempts++;
-  }
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    wifi_connected = true;
-    DisplayHelpers::setWiFiConnected(true);
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Connected to: %s", WIFI_SSID);
-    DisplayHelpers::showStatus(&display, buf);
-    Serial.println("WiFi connected.");
-    Serial.print("IP address : ");
-    Serial.println(WiFi.localIP());
-    Serial.print("MAC address : ");
-    Serial.println(WiFi.macAddress());
-  }
-  else
-  {
-    DisplayHelpers::showStatus(&display, "Failed to connect", true);
-    Serial.println("WARN: Failed to connect to WiFi");
-  }
+  connectivity.begin(&door, &display);
 
-  // OTA setup
-  ArduinoOTA.setHostname(OTA_HOSTNAME);
-  ArduinoOTA.setPassword(OTA_PASSWORD);
-  ArduinoOTA.begin();
-  DisplayHelpers::showStatus(&display, "OTA Ready");
-
-  ums3.setPixelColor(255, 0, 0); // Set the pixel color to red
-
-  door.setWiFiConnected(wifi_connected);
+  ums3.setPixelColor(255, 0, 0); // Set the pixel color to red during hardware setup
   door.setup();
 
-  if (wifi_connected) {
-    mqttSetup();  // Initialize MQTT after WiFi + door
-  }
+  mqttSetup(&doorTelemetry);  // MQTT client initialisation (connection handled in loop)
 
   // Optional: change distance publish interval (e.g. 60s)
   // mqttSetDistancePublishInterval(60000);
@@ -83,6 +68,7 @@ void setup()
 
 void loop()
 {
+  connectivity.loop();
   ArduinoOTA.handle();
   door.loop();
   mqttLoop();

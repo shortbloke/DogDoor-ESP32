@@ -93,7 +93,6 @@ void DisplayHelpers::drawStatusIcons(Adafruit_SSD1306 *display)
         display->setCursor(iconX, iconY);
         display->print(WiFi.localIP());
     }
-    display->display();
 }
 
 void DisplayHelpers::refreshStatus()
