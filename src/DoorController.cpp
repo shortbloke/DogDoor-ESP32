@@ -50,7 +50,7 @@ void DoorController::setup()
     delay(Config::SetupDelayMs / 2);
   }
   SERIAL_PRINT("VL53L0X Sensors initialized successfully\n");
-  updateSensorStates();
+  updateSensorStates(true);
   SERIAL_PRINT("Indoor sensor range: %d mm\n", range[0]);
   SERIAL_PRINT("Outdoor sensor range: %d mm\n", range[1]);
   DisplayHelpers::showStatus(display, "VL53L0X Sensors ready");
@@ -102,9 +102,7 @@ void DoorController::loop()
     DisplayHelpers::setWiFiConnected(wifiConnected);
     lastWiFiCheckMs = now;
   }
-  if (!keepClosed && !keepOpen) {
-    updateSensorStates();
-  }
+  updateSensorStates(!keepClosed && !keepOpen);
   
   checkOverrideSwitches();
   handleState();
@@ -245,9 +243,11 @@ void DoorController::setupLimitSwitches()
 // -----------------------------------------------------------------------------
 // Sensor Helpers
 // -----------------------------------------------------------------------------
-void DoorController::updateSensorStates()
+void DoorController::updateSensorStates(bool allowDoorTrigger)
 {
-  openDoor = false;
+  bool anySensorBelow = false;
+  bool triggerEvent = false;
+  uint8_t triggerSensorId = 0;
   for (size_t i = 0; i < Config::numTOFSensors; ++i)
   {
     if (!sensorReady[i])
@@ -280,13 +280,37 @@ void DoorController::updateSensorStates()
       continue;
     }
     // Check if the reading is below the threshold to trigger door opening
-    if (range[i] < Config::rangeThreshold[i])
+    bool below = range[i] < Config::rangeThreshold[i];
+    if (below)
     {
-      openDoor = true;
-      lastSensorTriggered = (i == 0) ? 1 : 2; // 1 = indoor, 2 = outdoor
-      DisplayHelpers::setLastSensorTriggered(lastSensorTriggered);
-      SERIAL_PRINT("%s sensor detected an object at %d mm\n", Config::sensorNames[i], range[i]);
+      anySensorBelow = true;
+      if (!sensorBelowThreshold[i])
+      {
+        triggerEvent = true;
+        triggerSensorId = (i == 0) ? 1 : 2; // 1 = indoor, 2 = outdoor
+        float cm = range[i] / 10.0f;
+        if (i == 0)
+        {
+          mqttPublishDistanceIndoor(cm);
+        }
+        else
+        {
+          mqttPublishDistanceOutdoor(cm);
+        }
+        mqttPublishSensorTrigger(triggerSensorId);
+        SERIAL_PRINT("%s sensor detected an object at %d mm\n", Config::sensorNames[i], range[i]);
+      }
     }
+    sensorBelowThreshold[i] = below;
+  }
+  if (triggerEvent)
+  {
+    lastSensorTriggered = triggerSensorId;
+    DisplayHelpers::setLastSensorTriggered(lastSensorTriggered);
+  }
+  if (allowDoorTrigger)
+  {
+    openDoor = anySensorBelow;
   }
 }
 

@@ -55,7 +55,7 @@ private:
   void setupLimitSwitches();
 
   // Sensor and state helpers
-  void updateSensorStates();
+  void updateSensorStates(bool allowDoorTrigger);
   void checkOverrideSwitches();
   void handleState();
   void showStateOnDisplay();
@@ -77,6 +77,7 @@ private:
   // --- Sensors and switches ---
   std::array<VL53L0X, Config::numTOFSensors> sensors;
   std::array<bool, Config::numTOFSensors> sensorReady{{false, false}};
+  std::array<bool, Config::numTOFSensors> sensorBelowThreshold{{false, false}};
   std::array<uint16_t, Config::numTOFSensors> range{{0, 0}};
   std::array<Bounce, Config::numLimitSwitches> limitSwitchDebouncers;
 
