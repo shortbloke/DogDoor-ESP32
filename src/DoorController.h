@@ -45,6 +45,9 @@ private:
   // WiFi status check timing
   unsigned long lastWiFiCheckMs = 0;
   static constexpr unsigned long wifiCheckIntervalMs = 30000; // 30 seconds
+  // Periodic VL53L0X re-initialization timing
+  unsigned long lastSensorInitMs = 0;
+  static constexpr unsigned long sensorReinitIntervalMs = 5UL * 60UL * 1000UL; // 5 minutes
   // --- State for display icons ---
   bool wifiConnected = false;
   // 0 = none, 1 = indoor, 2 = outdoor

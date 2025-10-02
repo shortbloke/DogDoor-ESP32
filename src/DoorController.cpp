@@ -102,6 +102,11 @@ void DoorController::loop()
     DisplayHelpers::setWiFiConnected(wifiConnected);
     lastWiFiCheckMs = now;
   }
+  if (!sensorInitNeeded && (now - lastSensorInitMs >= sensorReinitIntervalMs))
+  {
+    SERIAL_PRINT("Scheduling VL53L0X sensor re-initialization...\n");
+    sensorInitNeeded = true;
+  }
   updateSensorStates(!keepClosed && !keepOpen);
   
   checkOverrideSwitches();
@@ -227,6 +232,7 @@ bool DoorController::setupTOFSensors()
     }
   }
   SERIAL_PRINT("VL53L0X sensors initialized\n");
+  lastSensorInitMs = millis();
   return retVal;
 
 }
