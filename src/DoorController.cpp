@@ -114,7 +114,7 @@ void DoorController::loop()
 
   if (sensorInitNeeded)
   {
-    if (setupTOFSensors())
+    if (reinitTOFSensors())
     {
       sensorInitNeeded = false;
     }
@@ -235,6 +235,31 @@ bool DoorController::setupTOFSensors()
   lastSensorInitMs = millis();
   return retVal;
 
+}
+
+bool DoorController::reinitTOFSensors()
+{
+  bool success = true;
+  for (size_t i = 0; i < Config::numTOFSensors; ++i)
+  {
+    auto &sensor = sensors[i];
+    if (!sensor.init())
+    {
+      SERIAL_PRINT("%s sensor re-init failed!\n", Config::sensorNames[i]);
+      sensorReady[i] = false;
+      success = false;
+    }
+    else
+    {
+      sensorReady[i] = true;
+      SERIAL_PRINT("%s sensor re-init succeeded\n", Config::sensorNames[i]);
+    }
+  }
+  if (success)
+  {
+    lastSensorInitMs = millis();
+  }
+  return success;
 }
 void DoorController::setupLimitSwitches()
 {

@@ -55,6 +55,7 @@ private:
   // Hardware setup helpers
   void setupStepper();
   bool setupTOFSensors();
+  bool reinitTOFSensors();
   void setupLimitSwitches();
 
   // Sensor and state helpers
