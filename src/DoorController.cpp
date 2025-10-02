@@ -184,6 +184,8 @@ void DoorController::setupStepper()
     stepper->setDirectionPin(Config::dirPinStepper);
     stepper->setEnablePin(Config::enablePinStepper);
     stepper->setAutoEnable(false);
+    // digitalWrite(Config::enablePinStepper,
+                //  Config::stepperEnableActiveLow ? HIGH : LOW);
     stepper->setSpeedInHz(Config::stepsPerSecond);
     stepper->setAcceleration(Config::acceleration);
     stepper->setCurrentPosition(0);
@@ -217,6 +219,7 @@ bool DoorController::setupTOFSensors()
       char errorMsg[64];
       snprintf(errorMsg, sizeof(errorMsg), "ERROR:%s sensor failed!", Config::sensorNames[i]);
       DisplayHelpers::showStatus(display, errorMsg, true, 1);
+      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
       return false;
     }
     else
@@ -229,6 +232,7 @@ bool DoorController::setupTOFSensors()
       snprintf(statusMsg, sizeof(statusMsg), "%s sensor at 0x%X", Config::sensorNames[i], sensor.getAddress());
       DisplayHelpers::showStatus(display, statusMsg);
       sensorReady[i] = true;
+      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), true);
     }
   }
   SERIAL_PRINT("VL53L0X sensors initialized\n");
@@ -248,11 +252,13 @@ bool DoorController::reinitTOFSensors()
       SERIAL_PRINT("%s sensor re-init failed!\n", Config::sensorNames[i]);
       sensorReady[i] = false;
       success = false;
+      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
     }
     else
     {
       sensorReady[i] = true;
       SERIAL_PRINT("%s sensor re-init succeeded\n", Config::sensorNames[i]);
+      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), true);
     }
   }
   if (success)
@@ -265,11 +271,11 @@ void DoorController::setupLimitSwitches()
 {
   pinMode(Config::limitSwitchPins[BottomLimitSwitch], INPUT_PULLUP);
   limitSwitchDebouncers[BottomLimitSwitch].attach(Config::limitSwitchPins[BottomLimitSwitch]);
-  limitSwitchDebouncers[BottomLimitSwitch].interval(Config::DebounceIntervalMs);
+  limitSwitchDebouncers[BottomLimitSwitch].interval(Config::LimitSwitchDebounceMs);
 
   pinMode(Config::limitSwitchPins[TopLimitSwitch], INPUT_PULLUP);
   limitSwitchDebouncers[TopLimitSwitch].attach(Config::limitSwitchPins[TopLimitSwitch]);
-  limitSwitchDebouncers[TopLimitSwitch].interval(Config::DebounceIntervalMs);
+  limitSwitchDebouncers[TopLimitSwitch].interval(Config::LimitSwitchDebounceMs);
 }
 
 // -----------------------------------------------------------------------------
@@ -284,6 +290,7 @@ void DoorController::updateSensorStates(bool allowDoorTrigger)
   {
     if (!sensorReady[i])
     {
+      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
       continue;
     }
 
@@ -292,16 +299,19 @@ void DoorController::updateSensorStates(bool allowDoorTrigger)
     if (sensor.timeoutOccurred())
     {
       SERIAL_PRINT("%s sensor timeout, skipping...\n", Config::sensorNames[i]);
+      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
       continue;
     }
     else if (sensor.last_status != 0)
     {
       SERIAL_PRINT("%s sensor error %d, skipping...\n", Config::sensorNames[i], sensor.last_status);
+      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
       continue;
     }
     else if (range[i] == 0)
     {
       SERIAL_PRINT("%s sensor failed to read, skipping...\n", Config::sensorNames[i]);
+      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
       continue;
     }
     else if (range[i] == Config::TOFSensorErrorValue)
@@ -309,8 +319,10 @@ void DoorController::updateSensorStates(bool allowDoorTrigger)
       SERIAL_PRINT("%s sensor not found, scheduling re-initialization...\n", Config::sensorNames[i]);
       sensorInitNeeded = true;
       sensorReady[i] = false;
+      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
       continue;
     }
+    mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), true);
     // Check if the reading is below the threshold to trigger door opening
     bool below = range[i] < Config::rangeThreshold[i];
     if (below)
@@ -431,11 +443,11 @@ void DoorController::handleOpeningState()
   static bool seekTopMsgShown = false;
   if (stepper)
   {
-    if (isLimitSwitchPressed(TopLimitSwitch))
+    if (isLimitSwitchPressedRaw(TopLimitSwitch))
     {
-      expectedDoorOpenPosition = stepper->getCurrentPosition();
-      stepper->forceStop();
-      stepper->setCurrentPosition(expectedDoorOpenPosition);  // restore the position which is lost on forceStop
+      int32_t currentPos = stepper->getCurrentPosition();
+      expectedDoorOpenPosition = currentPos;
+      stepper->forceStopAndNewPosition(currentPos);
       SERIAL_PRINT("Top limit switch hit during opening, updating expectedDoorOpenPosition to %u\n", expectedDoorOpenPosition);
       state = DoorState::Open;
       openStateFirstEntry = true; // Reset for Open state
@@ -466,13 +478,23 @@ void DoorController::handleOpenState()
     openStateFirstEntry = false;
     SERIAL_PRINT("Entered Open state, starting hold timer.\n");
   }
+  // If a sensor is actively triggering, keep extending the hold window.
+  if (openDoor)
+  {
+    openStateEnteredMs = millis();
+    return;
+  }
   // Wait for the configured hold time before closing
   if (millis() - openStateEnteredMs >= Config::doorOpenHoldMs)
   {
-    if (isLimitSwitchPressed(TopLimitSwitch) && stepper)
+    if (stepper)
     {
-      expectedDoorOpenPosition = stepper->getCurrentPosition();
-      SERIAL_PRINT("Top limit switch hit, updating expectedDoorOpenPosition to %u\n", expectedDoorOpenPosition);
+      if (isLimitSwitchPressed(TopLimitSwitch))
+      {
+        expectedDoorOpenPosition = stepper->getCurrentPosition();
+        SERIAL_PRINT("Top limit switch hit, updating expectedDoorOpenPosition to %u\n", expectedDoorOpenPosition);
+      }
+      stepper->enableOutputs();
       state = DoorState::Closing;
       stepper->moveTo(Config::expectedDoorClosePosition, false);
       openStateFirstEntry = true; // Reset for next time
@@ -485,11 +507,12 @@ void DoorController::handleClosingState()
   static bool seekBottomMsgShown = false;
   if (stepper)
   {
-    if (isLimitSwitchPressed(BottomLimitSwitch))
+    if (isLimitSwitchPressedRaw(BottomLimitSwitch))
     {
-      stepper->forceStop();
-      stepper->setCurrentPosition(0);
+      stepper->forceStopAndNewPosition(0);
       stepper->disableOutputs();
+      digitalWrite(Config::enablePinStepper,
+                   Config::stepperEnableActiveLow ? HIGH : LOW);
       SERIAL_PRINT("Bottom limit switch hit, stepper position set to 0. Door closed.\n");
       state = DoorState::Closed;
       seekBottomMsgShown = false; // Reset flag after switch is hit
@@ -503,12 +526,18 @@ void DoorController::handleClosingState()
     }
     if (openDoor)
     {
-      SERIAL_PRINT("Reopening door\n");
+      SERIAL_PRINT("Sensor trigger detected while closing, reopening door\n");
       int32_t currentPos = stepper->getCurrentPosition();
-      stepper->forceStop();
-      stepper->setCurrentPosition(currentPos);  // restore the position
-      state = DoorState::Closed;
-      fastClosing = false; // <--- Reset fastClosing
+      stepper->forceStopAndNewPosition(currentPos);
+      fastClosing = false;
+      if (currentPos > expectedDoorOpenPosition)
+      {
+        expectedDoorOpenPosition = currentPos;
+      }
+      state = DoorState::Opening;
+      openStateFirstEntry = true;
+      stepper->enableOutputs();
+      stepper->moveTo(expectedDoorOpenPosition, false);
       return;
     }
     // Only seek incrementally if not in fastClosing mode or if moveTo is done
@@ -540,16 +569,23 @@ void DoorController::showStateOnDisplay()
 
 bool DoorController::isLimitSwitchPressed(LimitSwitch sw)
 {
-  return limitSwitchDebouncers[sw].read() == HIGH;
+  int value = limitSwitchDebouncers[sw].read();
+  return value == (Config::limitSwitchActiveHigh ? HIGH : LOW);
+}
+
+bool DoorController::isLimitSwitchPressedRaw(LimitSwitch sw) const
+{
+  int value = digitalRead(Config::limitSwitchPins[sw]);
+  return value == (Config::limitSwitchActiveHigh ? HIGH : LOW);
 }
 
 void DoorController::seekLimitSwitch(int direction, int steps)
 {
-    if (direction > 0 && isLimitSwitchPressed(TopLimitSwitch)) {
+    if (direction > 0 && (isLimitSwitchPressedRaw(TopLimitSwitch) || isLimitSwitchPressed(TopLimitSwitch))) {
         SERIAL_PRINT("Top limit switch pressed. Upward seek blocked.\n");
         return;
     }
-    if (direction < 0 && isLimitSwitchPressed(BottomLimitSwitch)) {
+    if (direction < 0 && (isLimitSwitchPressedRaw(BottomLimitSwitch) || isLimitSwitchPressed(BottomLimitSwitch))) {
         SERIAL_PRINT("Bottom limit switch pressed. Downward seek blocked.\n");
         return;
     }

@@ -12,3 +12,4 @@ void mqttSetDistancePublishInterval(uint32_t ms);
 void mqttPublishLimitSwitchTop(bool pressed);
 void mqttPublishLimitSwitchBottom(bool pressed);
 void mqttPublishSensorTrigger(uint8_t triggerId);
+void mqttPublishTOFSensorStatus(uint8_t sensorIndex, bool measurementOk);

@@ -35,6 +35,7 @@ public:
 
   // Returns debounced state of the given limit switch.
   bool isLimitSwitchPressed(LimitSwitch sw);
+  bool isLimitSwitchPressedRaw(LimitSwitch sw) const;
 
   uint8_t getLastSensorTriggered() const { return lastSensorTriggered; }
 

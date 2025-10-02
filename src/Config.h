@@ -29,6 +29,8 @@ namespace Config
   constexpr uint8_t dirPinStepper = 41;
   constexpr uint8_t enablePinStepper = 42;
   constexpr uint8_t stepPinStepper = 40;
+  constexpr bool stepperEnableActiveLow = true;
+  constexpr bool limitSwitchActiveHigh = true;
   constexpr int32_t stepsPerSecond = 17500;
   constexpr int32_t acceleration = 17500;
   constexpr int32_t expectedDoorClosePosition = 0;
@@ -37,6 +39,7 @@ namespace Config
   // --- Misc ---
   constexpr unsigned long SerialBaudRate = 115200;
   constexpr int DebounceIntervalMs = 10;
+  constexpr int LimitSwitchDebounceMs = 2;
   constexpr int SensorInitDelayMs = 10;
   constexpr int SetupDelayMs = 2000;
 
