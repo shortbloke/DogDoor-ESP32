@@ -217,6 +217,7 @@ bool DoorController::setupTOFSensors()
     else
     {
       sensor.setAddress(Config::TOFSensorStartAddress + i);
+      sensor.setMeasurementTimingBudget(Config::TOFSensorTimeMeasurementBudget);
       sensor.startContinuous();
       SERIAL_PRINT("%s sensor initialized at address: 0x%X\n", Config::sensorNames[i], sensor.getAddress());
       char statusMsg[64];

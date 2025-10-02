@@ -20,6 +20,7 @@ namespace Config
   constexpr uint8_t SCL = 9;
   constexpr std::array<uint16_t, numTOFSensors> rangeThreshold = {600, 300};
   constexpr uint16_t TOFSensorTimeout = 500;
+  constexpr uint32_t TOFSensorTimeMeasurementBudget = 100000; // Values in micro seconds 100ms
   constexpr uint8_t TOFSensorStartAddress = 0x2A;
   constexpr std::array<const char *, numTOFSensors> sensorNames = {"Indoor", "Outdoor"};
   constexpr uint16_t TOFSensorErrorValue = 65535;
