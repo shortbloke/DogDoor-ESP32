@@ -107,9 +107,11 @@ void DoorController::loop()
     SERIAL_PRINT("Scheduling VL53L0X sensor re-initialization...\n");
     sensorInitNeeded = true;
   }
-  updateSensorStates(!keepClosed && !keepOpen);
-  
+
   checkOverrideSwitches();
+
+  const bool doorTriggersAllowed = !keepClosed && !keepOpen;
+  updateSensorStates(doorTriggersAllowed);
   handleState();
 
   if (sensorInitNeeded)
@@ -157,17 +159,15 @@ const char* DoorController::getStateString() const {
 }
 
 float DoorController::getDistanceIndoorCm() const {
-    // Sensor 0 = indoor
-    if (Config::numTOFSensors < 1) return -1.0f;
-    uint16_t mm = range[0];
+    constexpr size_t indoorIndex = 0;
+    uint16_t mm = range[indoorIndex];
     if (mm == 0 || mm == Config::TOFSensorErrorValue) return -1.0f;
     return mm / 10.0f;
 }
 
 float DoorController::getDistanceOutdoorCm() const {
-    // Sensor 1 = outdoor
-    if (Config::numTOFSensors < 2) return -1.0f;
-    uint16_t mm = range[1];
+    constexpr size_t outdoorIndex = 1;
+    uint16_t mm = range[outdoorIndex];
     if (mm == 0 || mm == Config::TOFSensorErrorValue) return -1.0f;
     return mm / 10.0f;
 }
@@ -184,8 +184,6 @@ void DoorController::setupStepper()
     stepper->setDirectionPin(Config::dirPinStepper);
     stepper->setEnablePin(Config::enablePinStepper);
     stepper->setAutoEnable(false);
-    // digitalWrite(Config::enablePinStepper,
-                //  Config::stepperEnableActiveLow ? HIGH : LOW);
     stepper->setSpeedInHz(Config::stepsPerSecond);
     stepper->setAcceleration(Config::acceleration);
     stepper->setCurrentPosition(0);
@@ -200,7 +198,6 @@ void DoorController::setupStepper()
 bool DoorController::setupTOFSensors()
 {
   Wire.begin(Config::SDA, Config::SCL, 400000);
-  bool retVal = true;
   for (size_t i = 0; i < Config::numTOFSensors; ++i)
   {
     pinMode(Config::xshutPins[i], OUTPUT);
@@ -233,12 +230,12 @@ bool DoorController::setupTOFSensors()
       DisplayHelpers::showStatus(display, statusMsg);
       sensorReady[i] = true;
       mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), true);
+      mqttPublishTOFInit(static_cast<uint8_t>(i));
     }
   }
   SERIAL_PRINT("VL53L0X sensors initialized\n");
   lastSensorInitMs = millis();
-  return retVal;
-
+  return true;
 }
 
 bool DoorController::reinitTOFSensors()
@@ -259,6 +256,7 @@ bool DoorController::reinitTOFSensors()
       sensorReady[i] = true;
       SERIAL_PRINT("%s sensor re-init succeeded\n", Config::sensorNames[i]);
       mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), true);
+      mqttPublishTOFInit(static_cast<uint8_t>(i));
     }
   }
   if (success)
@@ -361,39 +359,48 @@ void DoorController::updateSensorStates(bool allowDoorTrigger)
 // -----------------------------------------------------------------------------
 // State Machine and Handlers
 // -----------------------------------------------------------------------------
-void DoorController::checkOverrideSwitches() {
-    // Keep Open override
-    if (digitalRead(Config::overrideKeepOpenSwitchPin) == HIGH && !keepOpen) {
-      openDoor = true; // Ensure door stays open
-      keepOpen = true;
-      SERIAL_PRINT("Override keep open switch activated. Door will remain open.\n");
+void DoorController::checkOverrideSwitches()
+{
+  const bool keepOpenActive = digitalRead(Config::overrideKeepOpenSwitchPin) == HIGH;
+  if (keepOpenActive && !keepOpen)
+  {
+    openDoor = true;
+    keepOpen = true;
+    SERIAL_PRINT("Override keep open switch activated. Door will remain open.\n");
+  }
+  else if (!keepOpenActive && keepOpen)
+  {
+    keepOpen = false;
+    openDoor = false;
+    if (stepper)
+    {
+      state = DoorState::Closing;
+      fastClosing = true;
+      displayedSeekBottomHint = false;
+      stepper->moveTo(Config::expectedDoorClosePosition, false);
     }
-    if (digitalRead(Config::overrideKeepOpenSwitchPin) == LOW && keepOpen) {
-      openDoor = false;
-      keepOpen = false;
-      if (stepper) {
-        state = DoorState::Closing;
-        fastClosing = true; // <--- Add this line
-        stepper->moveTo(Config::expectedDoorClosePosition, false); // Command fast close
-      } else {
-        state = DoorState::Closing;
-      }
-      SERIAL_PRINT("Override keep open switch deactivated. Resuming normal operation.\n");
+    else
+    {
+      state = DoorState::Closing;
     }
+    SERIAL_PRINT("Override keep open switch deactivated. Resuming normal operation.\n");
+  }
 
-    // Keep Closed override
-    if (digitalRead(Config::overrideKeepClosedSwitchPin) == HIGH && !keepClosed) {
-      openDoor = false; // Ensure door stays closed
-      keepClosed = true;
-      showStateOnDisplay();
-      SERIAL_PRINT("Override keep closed switch activated. Door will remain closed.\n");
-    }
-    if (digitalRead(Config::overrideKeepClosedSwitchPin) == LOW && keepClosed) {
-      keepClosed = false;
-      handleState(); // Re-evaluate state to possibly open door
-      showStateOnDisplay();
-      SERIAL_PRINT("Override keep closed switch deactivated. Resuming normal operation.\n");
-    }
+  const bool keepClosedActive = digitalRead(Config::overrideKeepClosedSwitchPin) == HIGH;
+  if (keepClosedActive && !keepClosed)
+  {
+    openDoor = false;
+    keepClosed = true;
+    showStateOnDisplay();
+    SERIAL_PRINT("Override keep closed switch activated. Door will remain closed.\n");
+  }
+  else if (!keepClosedActive && keepClosed)
+  {
+    keepClosed = false;
+    handleState();
+    showStateOnDisplay();
+    SERIAL_PRINT("Override keep closed switch deactivated. Resuming normal operation.\n");
+  }
 }
 
 void DoorController::handleState()
@@ -414,11 +421,11 @@ void DoorController::handleState()
         break;
     }
 
-    if (last_state != state)
+    if (previousState != state)
     {
         showStateOnDisplay();
     }
-    last_state = state;
+    previousState = state;
 }
 
 // --- State Handlers ---
@@ -433,6 +440,7 @@ void DoorController::handleClosedState()
     SERIAL_PRINT("Moving to expectedDoorOpenPosition %u\n", expectedDoorOpenPosition);
     SERIAL_PRINT("Current acceleration: %u\n", stepper->getAcceleration());
     state = DoorState::Opening;
+    displayedSeekTopHint = false;
     stepper->enableOutputs();
     stepper->moveTo(expectedDoorOpenPosition, false);
   }
@@ -440,32 +448,33 @@ void DoorController::handleClosedState()
 
 void DoorController::handleOpeningState()
 {
-  static bool seekTopMsgShown = false;
-  if (stepper)
+  if (!stepper)
   {
-    if (isLimitSwitchPressedRaw(TopLimitSwitch))
-    {
-      int32_t currentPos = stepper->getCurrentPosition();
-      expectedDoorOpenPosition = currentPos;
-      stepper->forceStopAndNewPosition(currentPos);
-      SERIAL_PRINT("Top limit switch hit during opening, updating expectedDoorOpenPosition to %u\n", expectedDoorOpenPosition);
-      state = DoorState::Open;
-      openStateFirstEntry = true; // Reset for Open state
-      seekTopMsgShown = false;    // Reset flag after switch is hit
-      return;
-    }
-    if (!seekTopMsgShown && !stepper->isRunning())
+    return;
+  }
+
+  if (isLimitSwitchPressedRaw(TopLimitSwitch))
+  {
+    int32_t currentPos = stepper->getCurrentPosition();
+    expectedDoorOpenPosition = currentPos;
+    stepper->forceStopAndNewPosition(currentPos);
+    SERIAL_PRINT("Top limit switch hit during opening, updating expectedDoorOpenPosition to %u\n", expectedDoorOpenPosition);
+    state = DoorState::Open;
+    openStateFirstEntry = true;
+    displayedSeekTopHint = false;
+    return;
+  }
+
+  if (!stepper->isRunning())
+  {
+    if (!displayedSeekTopHint)
     {
       DisplayHelpers::showStatus(display, "Seek top limit", true, 1);
-      seekTopMsgShown = true;
+      displayedSeekTopHint = true;
     }
-    if (!stepper->isRunning())
-    {
-      SERIAL_PRINT("Stepper stopped before reaching top limit, re-seeking top limit\n");
-      SERIAL_PRINT("Current position: %d\n expected position: %d\n", stepper->getCurrentPosition(), expectedDoorOpenPosition);
-      seekLimitSwitch(1, Config::seekIncrementSteps);
-    }
-    return;
+    SERIAL_PRINT("Stepper stopped before reaching top limit, re-seeking top limit\n");
+    SERIAL_PRINT("Current position: %d\n expected position: %d\n", stepper->getCurrentPosition(), expectedDoorOpenPosition);
+    seekLimitSwitch(1, Config::seekIncrementSteps);
   }
 }
 
@@ -496,6 +505,7 @@ void DoorController::handleOpenState()
       }
       stepper->enableOutputs();
       state = DoorState::Closing;
+      displayedSeekBottomHint = false;
       stepper->moveTo(Config::expectedDoorClosePosition, false);
       openStateFirstEntry = true; // Reset for next time
     }
@@ -504,52 +514,59 @@ void DoorController::handleOpenState()
 
 void DoorController::handleClosingState()
 {
-  static bool seekBottomMsgShown = false;
-  if (stepper)
+  if (!stepper)
   {
-    if (isLimitSwitchPressedRaw(BottomLimitSwitch))
+    return;
+  }
+
+  if (isLimitSwitchPressedRaw(BottomLimitSwitch))
+  {
+    stepper->forceStopAndNewPosition(0);
+    stepper->disableOutputs();
+    digitalWrite(Config::enablePinStepper,
+                 Config::stepperEnableActiveLow ? HIGH : LOW);
+    SERIAL_PRINT("Bottom limit switch hit, stepper position set to 0. Door closed.\n");
+    state = DoorState::Closed;
+    displayedSeekBottomHint = false;
+    fastClosing = false;
+    return;
+  }
+
+  if (openDoor)
+  {
+    SERIAL_PRINT("Sensor trigger detected while closing, reopening door\n");
+    int32_t currentPos = stepper->getCurrentPosition();
+    stepper->forceStopAndNewPosition(currentPos);
+    fastClosing = false;
+    if (currentPos > expectedDoorOpenPosition)
     {
-      stepper->forceStopAndNewPosition(0);
-      stepper->disableOutputs();
-      digitalWrite(Config::enablePinStepper,
-                   Config::stepperEnableActiveLow ? HIGH : LOW);
-      SERIAL_PRINT("Bottom limit switch hit, stepper position set to 0. Door closed.\n");
-      state = DoorState::Closed;
-      seekBottomMsgShown = false; // Reset flag after switch is hit
-      fastClosing = false;        // <--- Reset fastClosing
+      expectedDoorOpenPosition = currentPos;
+    }
+    state = DoorState::Opening;
+    displayedSeekTopHint = false;
+    openStateFirstEntry = true;
+    stepper->enableOutputs();
+    stepper->moveTo(expectedDoorOpenPosition, false);
+    return;
+  }
+
+  if (fastClosing)
+  {
+    if (stepper->isRunning())
+    {
       return;
     }
-    if (!seekBottomMsgShown && !stepper->isRunning())
+    fastClosing = false;
+  }
+
+  if (!stepper->isRunning())
+  {
+    if (!displayedSeekBottomHint)
     {
       DisplayHelpers::showStatus(display, "Seek bottom limit", true, 1);
-      seekBottomMsgShown = true;
-    }
-    if (openDoor)
-    {
-      SERIAL_PRINT("Sensor trigger detected while closing, reopening door\n");
-      int32_t currentPos = stepper->getCurrentPosition();
-      stepper->forceStopAndNewPosition(currentPos);
-      fastClosing = false;
-      if (currentPos > expectedDoorOpenPosition)
-      {
-        expectedDoorOpenPosition = currentPos;
-      }
-      state = DoorState::Opening;
-      openStateFirstEntry = true;
-      stepper->enableOutputs();
-      stepper->moveTo(expectedDoorOpenPosition, false);
-      return;
-    }
-    // Only seek incrementally if not in fastClosing mode or if moveTo is done
-    if (fastClosing) {
-      if (!stepper->isRunning()) {
-        fastClosing = false; // Finished fast close, now use incremental seek if needed
-      } else {
-        return; // Wait for fast close to finish
-      }
+      displayedSeekBottomHint = true;
     }
     seekLimitSwitch(-1, Config::seekIncrementSteps);
-    return;
   }
 }
 
@@ -562,9 +579,7 @@ void DoorController::showStateOnDisplay()
   {
     return;
   }
-  char stateMsg[64];
-  snprintf(stateMsg, sizeof(stateMsg), "%s", getStateString());
-  DisplayHelpers::showStatus(display, stateMsg, false, 2);
+  DisplayHelpers::showStatus(display, getStateString(), false, 2);
 }
 
 bool DoorController::isLimitSwitchPressed(LimitSwitch sw)
@@ -581,13 +596,19 @@ bool DoorController::isLimitSwitchPressedRaw(LimitSwitch sw) const
 
 void DoorController::seekLimitSwitch(int direction, int steps)
 {
-    if (direction > 0 && (isLimitSwitchPressedRaw(TopLimitSwitch) || isLimitSwitchPressed(TopLimitSwitch))) {
-        SERIAL_PRINT("Top limit switch pressed. Upward seek blocked.\n");
-        return;
-    }
-    if (direction < 0 && (isLimitSwitchPressedRaw(BottomLimitSwitch) || isLimitSwitchPressed(BottomLimitSwitch))) {
-        SERIAL_PRINT("Bottom limit switch pressed. Downward seek blocked.\n");
-        return;
-    }
-    stepper->move(direction * steps, false);
+  if (!stepper)
+  {
+    return;
+  }
+  if (direction > 0 && (isLimitSwitchPressedRaw(TopLimitSwitch) || isLimitSwitchPressed(TopLimitSwitch)))
+  {
+    SERIAL_PRINT("Top limit switch pressed. Upward seek blocked.\n");
+    return;
+  }
+  if (direction < 0 && (isLimitSwitchPressedRaw(BottomLimitSwitch) || isLimitSwitchPressed(BottomLimitSwitch)))
+  {
+    SERIAL_PRINT("Bottom limit switch pressed. Downward seek blocked.\n");
+    return;
+  }
+  stepper->move(direction * steps, false);
 }

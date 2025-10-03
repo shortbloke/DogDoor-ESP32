@@ -71,8 +71,6 @@ private:
   void handleOpenState();
   void handleClosingState();
 
-  // Display helpers moved to DisplayHelpers namespace
-
   void seekLimitSwitch(int direction, int steps);
 
   // --- Hardware interfaces ---
@@ -90,9 +88,11 @@ private:
   bool openDoor = false;
   bool keepClosed = false;
   bool keepOpen = false;
-  bool fastClosing = false; 
+  bool fastClosing = false;
+  bool displayedSeekTopHint = false;
+  bool displayedSeekBottomHint = false;
   DoorState state = DoorState::Closed;
-  DoorState last_state = DoorState::Closed;
+  DoorState previousState = DoorState::Closed;
   int32_t expectedDoorOpenPosition = 100000; // Updated at runtime based on limit switches
   UMS3 *ums3 = nullptr;
   Adafruit_SSD1306 *display = nullptr;

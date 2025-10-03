@@ -3,6 +3,8 @@
 #include <PubSubClient.h>
 #include <array>
 #include <cstdint>
+#include <cstdio>
+#include <limits>
 #include "Secrets.h"
 #include "DisplayHelpers.h"
 
@@ -14,31 +16,31 @@
 #endif
 
 // ---------- Configuration ----------
-static const char* MQTT_CLIENT_ID = "DogDoorESP32";
+constexpr char kMqttClientId[] = "DogDoorESP32";
 
 // Base topics (retain simple, HA discovery will point to these)
-static const char* TOPIC_DOOR_STATE          = "dogdoor/door/state";
-static const char* TOPIC_DOOR_STATE_ACTUAL   = "dogdoor/door/state_actual";
-static const char* TOPIC_DISTANCE_INDOOR     = "dogdoor/distance/indoor";
-static const char* TOPIC_DISTANCE_OUTDOOR    = "dogdoor/distance/outdoor";
-static const char* TOPIC_LIMIT_BOTTOM        = "dogdoor/limit/bottom";
-static const char* TOPIC_LIMIT_TOP           = "dogdoor/limit/top";
-static const char* TOPIC_SENSOR_TRIGGER      = "dogdoor/sensor_trigger";
-static const char* TOPIC_AVAILABILITY       = "dogdoor/status";  // LWT + availability
-static constexpr const char* TOF_STATUS_PAYLOAD_OK = "OK";
-static constexpr const char* TOF_STATUS_PAYLOAD_ERROR = "ERROR";
+constexpr char kTopicDoorState[] = "dogdoor/door/state";
+constexpr char kTopicDoorStateActual[] = "dogdoor/door/state_actual";
+constexpr char kTopicDistanceIndoor[] = "dogdoor/distance/indoor";
+constexpr char kTopicDistanceOutdoor[] = "dogdoor/distance/outdoor";
+constexpr char kTopicLimitBottom[] = "dogdoor/limit/bottom";
+constexpr char kTopicLimitTop[] = "dogdoor/limit/top";
+constexpr char kTopicSensorTrigger[] = "dogdoor/sensor_trigger";
+constexpr char kTopicAvailability[] = "dogdoor/status";  // LWT + availability
+constexpr char kTofStatusPayloadOk[] = "OK";
+constexpr char kTofStatusPayloadError[] = "ERROR";
 
 // Home Assistant discovery prefix & topics (component/node_id/object_id/config)
-static const char* DISCOVERY_PREFIX          = "homeassistant";
-static const char* NODE_ID                   = "dogdoor";
+constexpr char kDiscoveryPrefix[] = "homeassistant";
+constexpr char kNodeId[] = "dogdoor";
 
-static const char* DISCOVERY_DOOR_CFG        = "homeassistant/binary_sensor/dogdoor/door/config";
-static const char* DISCOVERY_DOOR_STATE_CFG  = "homeassistant/sensor/dogdoor/door_state/config";
-static const char* DISCOVERY_DIST_IN_CFG     = "homeassistant/sensor/dogdoor/distance_indoor/config";
-static const char* DISCOVERY_DIST_OUT_CFG    = "homeassistant/sensor/dogdoor/distance_outdoor/config";
-static const char* DISCOVERY_LIMIT_BOTTOM_CFG = "homeassistant/binary_sensor/dogdoor/limit_bottom/config";
-static const char* DISCOVERY_LIMIT_TOP_CFG    = "homeassistant/binary_sensor/dogdoor/limit_top/config";
-static const char* DISCOVERY_SENSOR_TRIGGER_CFG = "homeassistant/sensor/dogdoor/sensor_trigger/config";
+constexpr char kDiscoveryDoorConfig[] = "homeassistant/binary_sensor/dogdoor/door/config";
+constexpr char kDiscoveryDoorStateConfig[] = "homeassistant/sensor/dogdoor/door_state/config";
+constexpr char kDiscoveryDistanceIndoorConfig[] = "homeassistant/sensor/dogdoor/distance_indoor/config";
+constexpr char kDiscoveryDistanceOutdoorConfig[] = "homeassistant/sensor/dogdoor/distance_outdoor/config";
+constexpr char kDiscoveryLimitBottomConfig[] = "homeassistant/binary_sensor/dogdoor/limit_bottom/config";
+constexpr char kDiscoveryLimitTopConfig[] = "homeassistant/binary_sensor/dogdoor/limit_top/config";
+constexpr char kDiscoverySensorTriggerConfig[] = "homeassistant/sensor/dogdoor/sensor_trigger/config";
 
 // ---------- Internal State ----------
 static WiFiClient wifiClient;
@@ -56,6 +58,11 @@ static std::array<String, Config::numTOFSensors> tofStatusUniqueIds;
 static std::array<String, Config::numTOFSensors> tofStatusFriendlyNames;
 static std::array<int8_t, Config::numTOFSensors> tofStatusLatest;
 static std::array<int8_t, Config::numTOFSensors> tofStatusPublished;
+static std::array<String, Config::numTOFSensors> tofInitTopics;
+static std::array<String, Config::numTOFSensors> tofInitDiscoveryTopics;
+static std::array<String, Config::numTOFSensors> tofInitUniqueIds;
+static std::array<uint32_t, Config::numTOFSensors> tofInitCounters;
+static std::array<uint32_t, Config::numTOFSensors> tofInitPublished;
 static bool tofTopicsInitialized = false;
 
 // ---------- Helpers ----------
@@ -103,9 +110,12 @@ static void ensureTofTopicsInitialized() {
       slug = String("sensor_") + i;
     }
     tofStatusTopics[i] = String("dogdoor/tof/") + slug + "/status";
-    tofStatusDiscoveryTopics[i] = String(DISCOVERY_PREFIX) + "/binary_sensor/" + NODE_ID + "/tof_" + slug + "_status/config";
+    tofStatusDiscoveryTopics[i] = String(kDiscoveryPrefix) + "/binary_sensor/" + kNodeId + "/tof_" + slug + "_status/config";
     tofStatusUniqueIds[i] = String("dogdoor_tof_") + slug + "_status";
     tofStatusFriendlyNames[i] = name ? name : "Sensor";
+    tofInitTopics[i] = String("dogdoor/tof/") + slug + "/init_count";
+    tofInitDiscoveryTopics[i] = String(kDiscoveryPrefix) + "/sensor/" + kNodeId + "/tof_" + slug + "_init/config";
+    tofInitUniqueIds[i] = String("dogdoor_tof_") + slug + "_init";
   }
   tofTopicsInitialized = true;
 }
@@ -113,6 +123,27 @@ static void ensureTofTopicsInitialized() {
 static void resetTofStatusCaches() {
   tofStatusLatest.fill(-1);
   tofStatusPublished.fill(-1);
+  tofInitCounters.fill(0);
+  tofInitPublished.fill(std::numeric_limits<uint32_t>::max());
+}
+
+static void publishTofInitCount(size_t sensorIndex) {
+  if (!mqttClient.connected()) {
+    return;
+  }
+  if (sensorIndex >= Config::numTOFSensors) {
+    return;
+  }
+  if (tofInitPublished[sensorIndex] == tofInitCounters[sensorIndex]) {
+    return;
+  }
+  char buffer[12];
+  snprintf(buffer, sizeof(buffer), "%lu", static_cast<unsigned long>(tofInitCounters[sensorIndex]));
+  if (mqttClient.publish(tofInitTopics[sensorIndex].c_str(), buffer, true)) {
+    tofInitPublished[sensorIndex] = tofInitCounters[sensorIndex];
+  } else {
+    SERIAL_PRINT("[MQTT] Publish failed (%s)\n", tofInitTopics[sensorIndex].c_str());
+  }
 }
 
 static const char* normalizeDoorState(const char* raw) {
@@ -131,8 +162,8 @@ void mqttPublishDoorState(const char* state) {
   const char* normalized = normalizeDoorState(state);
   const char* raw = state ? state : "UNKNOWN";
 
-  mqttClient.publish(TOPIC_DOOR_STATE, normalized, true);
-  mqttClient.publish(TOPIC_DOOR_STATE_ACTUAL, raw, true);
+  mqttClient.publish(kTopicDoorState, normalized, true);
+  mqttClient.publish(kTopicDoorStateActual, raw, true);
 }
 
 static void mqttPublishFloat(const char* topic, float value) {
@@ -143,8 +174,8 @@ static void mqttPublishFloat(const char* topic, float value) {
   mqttClient.publish(topic, buf, true);
 }
 
-void mqttPublishDistanceIndoor(float cm)  { mqttPublishFloat(TOPIC_DISTANCE_INDOOR, cm); }
-void mqttPublishDistanceOutdoor(float cm) { mqttPublishFloat(TOPIC_DISTANCE_OUTDOOR, cm); }
+void mqttPublishDistanceIndoor(float cm)  { mqttPublishFloat(kTopicDistanceIndoor, cm); }
+void mqttPublishDistanceOutdoor(float cm) { mqttPublishFloat(kTopicDistanceOutdoor, cm); }
 
 static void mqttPublishLimit(const char* topic, bool pressed) {
   if (!mqttClient.connected()) return;
@@ -152,11 +183,11 @@ static void mqttPublishLimit(const char* topic, bool pressed) {
 }
 
 void mqttPublishLimitSwitchTop(bool pressed) {
-  mqttPublishLimit(TOPIC_LIMIT_TOP, pressed);
+  mqttPublishLimit(kTopicLimitTop, pressed);
 }
 
 void mqttPublishLimitSwitchBottom(bool pressed) {
-  mqttPublishLimit(TOPIC_LIMIT_BOTTOM, pressed);
+  mqttPublishLimit(kTopicLimitBottom, pressed);
 }
 
 void mqttPublishSensorTrigger(uint8_t triggerId) {
@@ -164,7 +195,7 @@ void mqttPublishSensorTrigger(uint8_t triggerId) {
   const char* payload = "NONE";
   if (triggerId == 1) payload = "INDOOR";
   else if (triggerId == 2) payload = "OUTDOOR";
-  mqttClient.publish(TOPIC_SENSOR_TRIGGER, payload, true);
+  mqttClient.publish(kTopicSensorTrigger, payload, true);
 }
 
 void mqttPublishTOFSensorStatus(uint8_t sensorIndex, bool measurementOk) {
@@ -184,7 +215,7 @@ void mqttPublishTOFSensorStatus(uint8_t sensorIndex, bool measurementOk) {
     return;
   }
 
-  const char* payload = measurementOk ? TOF_STATUS_PAYLOAD_OK : TOF_STATUS_PAYLOAD_ERROR;
+  const char* payload = measurementOk ? kTofStatusPayloadOk : kTofStatusPayloadError;
   if (mqttClient.publish(tofStatusTopics[sensorIndex].c_str(), payload, true)) {
     tofStatusPublished[sensorIndex] = latest;
   } else {
@@ -194,6 +225,15 @@ void mqttPublishTOFSensorStatus(uint8_t sensorIndex, bool measurementOk) {
 
 void mqttSetDistancePublishInterval(uint32_t ms) {
   distancePublishIntervalMs = ms;
+}
+
+void mqttPublishTOFInit(uint8_t sensorIndex) {
+  ensureTofTopicsInitialized();
+  if (sensorIndex >= Config::numTOFSensors) {
+    return;
+  }
+  ++tofInitCounters[sensorIndex];
+  publishTofInitCount(sensorIndex);
 }
 
 // Home Assistant discovery payloads
@@ -215,10 +255,10 @@ static void publishDiscovery() {
       "\"name\":\"Dog Door\","
       "\"unique_id\":\"dogdoor_door\","
       "\"device_class\":\"door\","
-      "\"state_topic\":\"") + TOPIC_DOOR_STATE + "\","
+      "\"state_topic\":\"") + kTopicDoorState + "\","
       "\"payload_on\":\"OPEN\","
       "\"payload_off\":\"CLOSED\","
-      "\"availability_topic\":\"" + String(TOPIC_AVAILABILITY) + "\","
+      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
       "\"payload_available\":\"online\","
       "\"payload_not_available\":\"offline\","
       "\"device\":" + deviceObj +
@@ -229,8 +269,8 @@ static void publishDiscovery() {
     String("{"
       "\"name\":\"Dog Door State\","
       "\"unique_id\":\"dogdoor_state\","
-      "\"state_topic\":\"") + TOPIC_DOOR_STATE_ACTUAL + "\","
-      "\"availability_topic\":\"" + String(TOPIC_AVAILABILITY) + "\","
+      "\"state_topic\":\"") + kTopicDoorStateActual + "\","
+      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
       "\"payload_available\":\"online\","
       "\"payload_not_available\":\"offline\","
       "\"icon\":\"mdi:door\","
@@ -245,8 +285,8 @@ static void publishDiscovery() {
       "\"device_class\":\"distance\","
       "\"state_class\":\"measurement\","
       "\"unit_of_measurement\":\"cm\","
-      "\"state_topic\":\"") + TOPIC_DISTANCE_INDOOR + "\","
-      "\"availability_topic\":\"" + String(TOPIC_AVAILABILITY) + "\","
+      "\"state_topic\":\"") + kTopicDistanceIndoor + "\","
+      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
       "\"payload_available\":\"online\","
       "\"payload_not_available\":\"offline\","
       "\"device\":" + deviceObj +
@@ -260,8 +300,8 @@ static void publishDiscovery() {
       "\"device_class\":\"distance\","
       "\"state_class\":\"measurement\","
       "\"unit_of_measurement\":\"cm\","
-      "\"state_topic\":\"") + TOPIC_DISTANCE_OUTDOOR + "\","
-      "\"availability_topic\":\"" + String(TOPIC_AVAILABILITY) + "\","
+      "\"state_topic\":\"") + kTopicDistanceOutdoor + "\","
+      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
       "\"payload_available\":\"online\","
       "\"payload_not_available\":\"offline\","
       "\"device\":" + deviceObj +
@@ -273,10 +313,10 @@ static void publishDiscovery() {
       "\"name\":\"Dog Door Limit Bottom\","
       "\"unique_id\":\"dogdoor_limit_bottom\","
       "\"device_class\":\"door\","
-      "\"state_topic\":\"") + TOPIC_LIMIT_BOTTOM + "\","
+      "\"state_topic\":\"") + kTopicLimitBottom + "\","
       "\"payload_on\":\"ON\","
       "\"payload_off\":\"OFF\","
-      "\"availability_topic\":\"" + String(TOPIC_AVAILABILITY) + "\","
+      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
       "\"payload_available\":\"online\","
       "\"payload_not_available\":\"offline\","
       "\"device\":" + deviceObj +
@@ -288,10 +328,10 @@ static void publishDiscovery() {
       "\"name\":\"Dog Door Limit Top\","
       "\"unique_id\":\"dogdoor_limit_top\","
       "\"device_class\":\"door\","
-      "\"state_topic\":\"") + TOPIC_LIMIT_TOP + "\","
+      "\"state_topic\":\"") + kTopicLimitTop + "\","
       "\"payload_on\":\"ON\","
       "\"payload_off\":\"OFF\","
-      "\"availability_topic\":\"" + String(TOPIC_AVAILABILITY) + "\","
+      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
       "\"payload_available\":\"online\","
       "\"payload_not_available\":\"offline\","
       "\"device\":" + deviceObj +
@@ -302,8 +342,8 @@ static void publishDiscovery() {
     String("{"
       "\"name\":\"Dog Door Sensor Trigger\","
       "\"unique_id\":\"dogdoor_sensor_trigger\","
-      "\"state_topic\":\"") + TOPIC_SENSOR_TRIGGER + "\","
-      "\"availability_topic\":\"" + String(TOPIC_AVAILABILITY) + "\","
+      "\"state_topic\":\"") + kTopicSensorTrigger + "\","
+      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
       "\"payload_available\":\"online\","
       "\"payload_not_available\":\"offline\","
       "\"icon\":\"mdi:arrow-decision\","
@@ -311,13 +351,13 @@ static void publishDiscovery() {
     "}";
 
   bool ok = true;
-  ok &= publishRetained(DISCOVERY_DOOR_CFG, doorPayload);
-  ok &= publishRetained(DISCOVERY_DOOR_STATE_CFG, doorStatePayload);
-  ok &= publishRetained(DISCOVERY_DIST_IN_CFG, distInPayload);
-  ok &= publishRetained(DISCOVERY_DIST_OUT_CFG, distOutPayload);
-  ok &= publishRetained(DISCOVERY_LIMIT_BOTTOM_CFG, limitBottomPayload);
-  ok &= publishRetained(DISCOVERY_LIMIT_TOP_CFG, limitTopPayload);
-  ok &= publishRetained(DISCOVERY_SENSOR_TRIGGER_CFG, sensorTriggerPayload);
+  ok &= publishRetained(kDiscoveryDoorConfig, doorPayload);
+  ok &= publishRetained(kDiscoveryDoorStateConfig, doorStatePayload);
+  ok &= publishRetained(kDiscoveryDistanceIndoorConfig, distInPayload);
+  ok &= publishRetained(kDiscoveryDistanceOutdoorConfig, distOutPayload);
+  ok &= publishRetained(kDiscoveryLimitBottomConfig, limitBottomPayload);
+  ok &= publishRetained(kDiscoveryLimitTopConfig, limitTopPayload);
+  ok &= publishRetained(kDiscoverySensorTriggerConfig, sensorTriggerPayload);
 
   for (size_t i = 0; i < Config::numTOFSensors; ++i) {
     String sensorName = String("Dog Door ") + tofStatusFriendlyNames[i] + " TOF Status";
@@ -327,14 +367,28 @@ static void publishDiscovery() {
         "\"unique_id\":\"" + tofStatusUniqueIds[i] + "\"," +
         "\"device_class\":\"problem\"," +
         "\"state_topic\":\"" + tofStatusTopics[i] + "\"," +
-        "\"payload_on\":\"" + TOF_STATUS_PAYLOAD_ERROR + "\"," +
-        "\"payload_off\":\"" + TOF_STATUS_PAYLOAD_OK + "\"," +
-        "\"availability_topic\":\"" + String(TOPIC_AVAILABILITY) + "\"," +
+        "\"payload_on\":\"" + kTofStatusPayloadError + "\"," +
+        "\"payload_off\":\"" + kTofStatusPayloadOk + "\"," +
+        "\"availability_topic\":\"" + String(kTopicAvailability) + "\"," +
         "\"payload_available\":\"online\"," +
         "\"payload_not_available\":\"offline\"," +
         "\"device\":" + deviceObj +
       "}";
     ok &= publishRetained(tofStatusDiscoveryTopics[i].c_str(), payload);
+
+    String initPayload =
+      String("{") +
+        "\"name\":\"Dog Door " + tofStatusFriendlyNames[i] + " TOF Init Count\"," +
+        "\"unique_id\":\"" + tofInitUniqueIds[i] + "\"," +
+        "\"state_topic\":\"" + tofInitTopics[i] + "\"," +
+        "\"availability_topic\":\"" + String(kTopicAvailability) + "\"," +
+        "\"payload_available\":\"online\"," +
+        "\"payload_not_available\":\"offline\"," +
+        "\"unit_of_measurement\":\"count\"," +
+        "\"icon\":\"mdi:counter\"," +
+        "\"device\":" + deviceObj +
+      "}";
+    ok &= publishRetained(tofInitDiscoveryTopics[i].c_str(), initPayload);
   }
 
   if (ok) {
@@ -354,13 +408,13 @@ static void mqttReconnect() {
   while (!mqttClient.connected()) {
     // Set LWT (availability) on connect attempt
     if (mqttClient.connect(
-          MQTT_CLIENT_ID,
+          kMqttClientId,
           MQTT_USER, MQTT_PASSWORD,
-          TOPIC_AVAILABILITY, 0, true, "offline"
+          kTopicAvailability, 0, true, "offline"
         )) {
       SERIAL_PRINT("[MQTT] Connected\n");
       // Mark online (retain)
-      mqttClient.publish(TOPIC_AVAILABILITY, "online", true);
+      mqttClient.publish(kTopicAvailability, "online", true);
       DisplayHelpers::setMQTTConnected(true);
 
       if (!discoveryPublished) publishDiscovery();
@@ -379,6 +433,7 @@ static void mqttReconnect() {
           tofStatusPublished[i] = -1;
           mqttPublishTOFSensorStatus(i, tofStatusLatest[i] == 1);
         }
+        publishTofInitCount(i);
       }
       lastDoorState = st ? st : "";
       lastSensorTriggerPublished = triggerId;

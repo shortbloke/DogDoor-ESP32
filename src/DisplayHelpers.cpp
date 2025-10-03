@@ -5,7 +5,7 @@
 // Static member definitions
 bool DisplayHelpers::wifiConnected = false;
 bool DisplayHelpers::mqttConnected = false;
-int DisplayHelpers::lastSensorTriggered = 0;
+uint8_t DisplayHelpers::lastSensorTriggered = 0;
 Adafruit_SSD1306 *DisplayHelpers::activeDisplay = nullptr;
 bool DisplayHelpers::lastMessageValid = false;
 bool DisplayHelpers::lastMessageWasWarning = false;
@@ -26,7 +26,7 @@ void DisplayHelpers::setMQTTConnected(bool connected)
     mqttConnected = connected;
     refreshStatus();
 }
-void DisplayHelpers::setLastSensorTriggered(int sensor)
+void DisplayHelpers::setLastSensorTriggered(uint8_t sensor)
 {
     if (lastSensorTriggered == sensor)
         return;
@@ -38,9 +38,20 @@ void DisplayHelpers::showStatus(Adafruit_SSD1306 *display, const char *msg, bool
 {
     if (!display)
         return;
+
+    const bool displayChanged = activeDisplay != display;
+    const bool nextMessageValid = (msg != nullptr) && (msg[0] != '\0');
+    bool messageChanged = (lastMessageValid != nextMessageValid);
+    if (!messageChanged && nextMessageValid)
+    {
+        messageChanged = std::strncmp(lastMessage, msg, maxMessageLength - 1) != 0;
+    }
+    const bool warningChanged = (lastMessageWasWarning != isWarning);
+    const bool textSizeChanged = (lastMessageTextSize != textSize);
+
     activeDisplay = display;
-    lastMessageValid = (msg != nullptr);
-    if (lastMessageValid)
+    lastMessageValid = nextMessageValid;
+    if (nextMessageValid)
     {
         std::strncpy(lastMessage, msg, maxMessageLength - 1);
         lastMessage[maxMessageLength - 1] = '\0';
@@ -51,6 +62,12 @@ void DisplayHelpers::showStatus(Adafruit_SSD1306 *display, const char *msg, bool
     }
     lastMessageWasWarning = isWarning;
     lastMessageTextSize = textSize;
+
+    if (!displayChanged && !messageChanged && !warningChanged && !textSizeChanged)
+    {
+        return;
+    }
+
     renderStatus(display, lastMessageValid ? lastMessage : nullptr, isWarning, textSize);
 }
 

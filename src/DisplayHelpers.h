@@ -1,6 +1,7 @@
 #pragma once
 #include <Adafruit_SSD1306.h>
 #include <cstddef>
+#include <cstdint>
 #include "IconBitmaps.h"
 
 class DisplayHelpers
@@ -11,12 +12,12 @@ public:
     static void refreshStatus();
     static void setWiFiConnected(bool connected);
     static void setMQTTConnected(bool connected);
-    static void setLastSensorTriggered(int sensor);
+    static void setLastSensorTriggered(uint8_t sensorId);
 
 private:
     static bool wifiConnected;
     static bool mqttConnected;
-    static int lastSensorTriggered;
+    static uint8_t lastSensorTriggered;
     static Adafruit_SSD1306 *activeDisplay;
     static bool lastMessageValid;
     static bool lastMessageWasWarning;
