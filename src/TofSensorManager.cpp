@@ -40,7 +40,7 @@ bool TofSensorManager::begin(bool allowRetry)
     {
       display->showStatus("Retrying VL53L0X init", true);
     }
-    delay(Config::SetupDelayMs);
+    delay(Config.timing.setupDelayMs);
   }
   (void)attempt;
   return true;
@@ -51,7 +51,7 @@ TofSensorManager::UpdateResult TofSensorManager::update()
   UpdateResult result;
   unsigned long now = millis();
 
-  if (!sensorInitNeeded && (now - lastSensorInitMs >= Config::SensorReinitIntervalMs))
+  if (!sensorInitNeeded && (now - lastSensorInitMs >= Config.timing.sensorReinitIntervalMs))
   {
     sensorInitNeeded = true;
     nextReinitAttemptMs = now;
@@ -61,6 +61,7 @@ TofSensorManager::UpdateResult TofSensorManager::update()
   {
     bool withinGrace = now < sensorStatusSuppressUntil[i];
     auto &sensor = sensors[i];
+    measurementOk[i] = false;
 
     if (!sensorReady[i])
     {
@@ -80,6 +81,7 @@ TofSensorManager::UpdateResult TofSensorManager::update()
       (void)sensor.timeoutOccurred();
       sensorBelowThreshold[i] = false;
       sensorBelowStreak[i] = 0;
+      measurementOk[i] = true;
       publishSensorStatus(static_cast<uint8_t>(i), true, false);
       continue;
     }
@@ -104,36 +106,37 @@ TofSensorManager::UpdateResult TofSensorManager::update()
       continue;
     }
 
-    if (reading == Config::TOFSensorErrorValue)
+    if (reading == Config.tof.errorValue)
     {
       publishSensorStatus(static_cast<uint8_t>(i), false, false);
       sensorInitNeeded = true;
       sensorReady[i] = false;
       sensorBelowThreshold[i] = false;
       sensorBelowStreak[i] = 0;
-      sensorStatusSuppressUntil[i] = millis() + Config::SensorStatusGracePeriodMs;
+      sensorStatusSuppressUntil[i] = millis() + Config.timing.sensorStatusGracePeriodMs;
       continue;
     }
 
     publishSensorStatus(static_cast<uint8_t>(i), true, false);
+    measurementOk[i] = true;
 
-    if (reading > Config::TOFSensorMaxConsideredDistanceMm)
+    if (reading > Config.tof.maxConsideredDistanceMm)
     {
       sensorBelowThreshold[i] = false;
       sensorBelowStreak[i] = 0;
       continue;
     }
 
-    bool below = reading < Config::rangeThreshold[i];
+    bool below = reading < Config.tof.rangeThresholdMm[i];
     if (below)
     {
       uint8_t &streak = sensorBelowStreak[i];
-      if (streak < Config::TOFSensorTriggerConsecutiveReadings)
+      if (streak < Config.tof.consecutiveReadingsForTrigger)
       {
         ++streak;
       }
 
-      if (streak >= Config::TOFSensorTriggerConsecutiveReadings)
+      if (streak >= Config.tof.consecutiveReadingsForTrigger)
       {
         result.anySensorQualified = true;
         if (!sensorBelowThreshold[i])
@@ -176,14 +179,14 @@ TofSensorManager::UpdateResult TofSensorManager::update()
     }
   }
 
-  if (Config::enableSensorDebugDisplay && display)
+  if (Config.tof.enableDebugDisplay && display)
   {
     auto formatDistance = [](uint16_t mm, char *out, size_t len) {
       if (len == 0)
       {
         return;
       }
-      if (mm == 0 || mm == Config::TOFSensorErrorValue)
+      if (mm == 0 || mm == Config.tof.errorValue)
       {
         std::strncpy(out, "--", len - 1);
         out[len - 1] = '\0';
@@ -221,7 +224,7 @@ float TofSensorManager::distanceCm(size_t index) const
     return -1.0f;
   }
   uint16_t mm = ranges[index];
-  if (mm == 0 || mm == Config::TOFSensorErrorValue)
+  if (mm == 0 || mm == Config.tof.errorValue)
   {
     return -1.0f;
   }
@@ -236,7 +239,7 @@ void TofSensorManager::requestReinitialisation()
 
 bool TofSensorManager::initialiseSensors(bool isReinit)
 {
-  Wire.begin(Config::SDA, Config::SCL, 400000);
+  Wire.begin(Config.tof.sdaPin, Config.tof.sclPin, 400000);
 
   for (size_t i = 0; i < kSensorCount; ++i)
   {
@@ -244,13 +247,14 @@ bool TofSensorManager::initialiseSensors(bool isReinit)
     {
       sensors[i].stopContinuous();
     }
-    pinMode(Config::xshutPins[i], OUTPUT);
-    digitalWrite(Config::xshutPins[i], LOW);
+    pinMode(Config.tof.xshutPins[i], OUTPUT);
+    digitalWrite(Config.tof.xshutPins[i], LOW);
     sensorReady[i] = false;
     sensorBelowThreshold[i] = false;
     sensorBelowStreak[i] = 0;
     ranges[i] = 0;
-    sensorStatusSuppressUntil[i] = millis() + Config::SensorStatusGracePeriodMs;
+    sensorStatusSuppressUntil[i] = millis() + Config.timing.sensorStatusGracePeriodMs;
+    measurementOk[i] = false;
   }
 
   if (isReinit)
@@ -262,18 +266,18 @@ bool TofSensorManager::initialiseSensors(bool isReinit)
     }
   }
 
-  delay(Config::SensorInitDelayMs);
+  delay(Config.timing.sensorInitDelayMs);
 
   bool success = true;
 
   for (size_t i = 0; i < kSensorCount; ++i)
   {
-    pinMode(Config::xshutPins[i], INPUT);
-    delay(Config::SensorInitDelayMs);
+    pinMode(Config.tof.xshutPins[i], INPUT);
+    delay(Config.timing.sensorInitDelayMs);
 
     auto &sensor = sensors[i];
     sensor.setBus(&Wire);
-    sensor.setTimeout(Config::TOFSensorTimeout);
+    sensor.setTimeout(Config.tof.timeoutMs);
     if (!sensor.init())
     {
       publishSensorStatus(static_cast<uint8_t>(i), false, false);
@@ -281,28 +285,29 @@ bool TofSensorManager::initialiseSensors(bool isReinit)
       if (display && !isReinit)
       {
         char errorMsg[64];
-        snprintf(errorMsg, sizeof(errorMsg), "ERROR:%s sensor failed!", Config::sensorNames[i]);
+        snprintf(errorMsg, sizeof(errorMsg), "ERROR:%s sensor failed!", Config.tof.names[i]);
         display->showStatus(errorMsg, true);
       }
       continue;
     }
 
-    sensor.setAddress(Config::TOFSensorStartAddress + i);
-    sensor.setMeasurementTimingBudget(Config::TOFSensorTimeMeasurementBudget);
+    sensor.setAddress(Config.tof.startAddress + i);
+    sensor.setMeasurementTimingBudget(Config.tof.timingBudgetUs);
     sensor.startContinuous();
 
     sensorReady[i] = true;
     sensorBelowThreshold[i] = false;
     sensorBelowStreak[i] = 0;
     ranges[i] = 0;
-    sensorStatusSuppressUntil[i] = millis() + Config::SensorStatusGracePeriodMs;
+    sensorStatusSuppressUntil[i] = millis() + Config.timing.sensorStatusGracePeriodMs;
+    measurementOk[i] = false;
 
     publishSensorStatus(static_cast<uint8_t>(i), true, true);
 
     if (display && !isReinit)
     {
       char statusMsg[64];
-      snprintf(statusMsg, sizeof(statusMsg), "%s sensor at 0x%X", Config::sensorNames[i], sensor.getAddress());
+      snprintf(statusMsg, sizeof(statusMsg), "%s sensor at 0x%X", Config.tof.names[i], sensor.getAddress());
       display->showStatus(statusMsg);
     }
   }

@@ -31,6 +31,8 @@ public:
   const char *getStateString() const;
   float getDistanceIndoorCm() const;
   float getDistanceOutdoorCm() const;
+  DoorState getCurrentState() const;
+  bool isWiFiConnected() const { return wifiConnected; }
 
   void refreshStateDisplay();
 
@@ -73,7 +75,7 @@ private:
   FastAccelStepper *stepper = nullptr;
 
   // --- Sensors and switches ---
-  std::array<Bounce, Config::numLimitSwitches> limitSwitchDebouncers;
+  std::array<Bounce, LimitSwitchConfig::count> limitSwitchDebouncers;
 
   // --- State variables ---
   bool openDoor = false;
@@ -89,7 +91,7 @@ private:
   TofSensorManager *tofSensors = nullptr;
   unsigned long openStateEnteredMs = 0;
   bool openStateFirstEntry = true;
-  std::array<int8_t, Config::numLimitSwitches> lastLimitSwitchState{{-1, -1}};
+  std::array<int8_t, LimitSwitchConfig::count> lastLimitSwitchState{{-1, -1}};
 
   void setPixelColor(uint8_t r, uint8_t g, uint8_t b);
 };

@@ -12,7 +12,7 @@ class DisplayService;
 // so high-level logic can reason about sensor outcomes instead of I2C details.
 class TofSensorManager {
 public:
-  static constexpr size_t kSensorCount = Config::numTOFSensors;
+  static constexpr size_t kSensorCount = TofSensorConfig::count;
 
   struct UpdateResult {
     bool anySensorQualified = false;
@@ -36,6 +36,10 @@ public:
 
   void requestReinitialisation();
 
+  const std::array<uint16_t, kSensorCount>& rangesMm() const { return ranges; }
+  const std::array<bool, kSensorCount>& readyFlags() const { return sensorReady; }
+  const std::array<bool, kSensorCount>& measurementFlags() const { return measurementOk; }
+
 private:
   bool initialiseSensors(bool isReinit);
   void publishSensorStatus(uint8_t sensorIndex, bool ok, bool reportInitEvent);
@@ -49,6 +53,7 @@ private:
   std::array<uint16_t, kSensorCount> ranges{{0, 0}};
   std::array<unsigned long, kSensorCount> sensorStatusSuppressUntil{{0, 0}};
   std::array<uint8_t, kSensorCount> sensorBelowStreak{{0, 0}};
+  std::array<bool, kSensorCount> measurementOk{{false, false}};
 
   unsigned long lastSensorInitMs = 0;
   unsigned long nextReinitAttemptMs = 0;

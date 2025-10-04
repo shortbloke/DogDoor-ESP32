@@ -7,6 +7,7 @@
 #include "DoorController.h"
 #include "ConnectivityManager.h"
 #include "DoorTelemetryProvider.h"
+#include "DiagnosticsService.h"
 
 // Aggregates application components so setup()/loop() can stay lean.
 class AppContainer {
@@ -42,4 +43,5 @@ private:
   DoorController door;
   ConnectivityManager connectivity;
   DoorControllerTelemetry telemetry;
+  DiagnosticsService diagnostics;
 };

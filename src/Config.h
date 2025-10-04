@@ -2,54 +2,76 @@
 // Config.h - Central configuration for DogDoor-ESP32 hardware and logic.
 
 #include <array>
+#include <cstdint>
 
-namespace Config
+struct LimitSwitchConfig
 {
-  // --- Limit Switches ---
-  constexpr size_t numLimitSwitches = 2;
-  constexpr std::array<uint8_t, numLimitSwitches> limitSwitchPins = {1, 2};
+  static constexpr size_t count = 2;
+  std::array<uint8_t, count> pins{1, 2};
+  bool activeHigh = true;
+  int debounceMs = 2;
+};
 
-  // --- GPIO pins for override switches ---
-  constexpr uint8_t overrideKeepOpenSwitchPin = 3;
-  constexpr uint8_t overrideKeepClosedSwitchPin = 4;
+struct OverrideSwitchConfig
+{
+  uint8_t keepOpenPin = 3;
+  uint8_t keepClosedPin = 4;
+};
 
-  // --- VL53L0X Time-of-Flight Sensors ---
-  constexpr size_t numTOFSensors = 2;
-  constexpr std::array<uint8_t, numTOFSensors> xshutPins = {7, 6};
-  constexpr uint8_t SDA = 8;
-  constexpr uint8_t SCL = 9;
-  constexpr std::array<uint16_t, numTOFSensors> rangeThreshold = {600, 300};
-  constexpr uint16_t TOFSensorTimeout = 500;
-  constexpr uint32_t TOFSensorTimeMeasurementBudget = 80000; // Values in micro seconds 80ms
-  constexpr uint8_t TOFSensorStartAddress = 0x2A;
-  constexpr std::array<const char *, numTOFSensors> sensorNames = {"Indoor", "Outdoor"};
-  constexpr uint16_t TOFSensorErrorValue = 65535;
-  constexpr uint16_t TOFSensorMaxConsideredDistanceMm = 1000; // Ignore readings beyond 100 cm
-  constexpr uint8_t TOFSensorTriggerConsecutiveReadings = 4; // Number of consecutive readings below threshold to trigger action
-  constexpr bool enableSensorDebugDisplay = false;
+struct TofSensorConfig
+{
+  static constexpr size_t count = 2;
+  std::array<uint8_t, count> xshutPins{7, 6};
+  uint8_t sdaPin = 8;
+  uint8_t sclPin = 9;
+  std::array<uint16_t, count> rangeThresholdMm{600, 300};
+  uint16_t timeoutMs = 500;
+  uint32_t timingBudgetUs = 80000; // microseconds
+  uint8_t startAddress = 0x2A;
+  std::array<const char *, count> names{"Indoor", "Outdoor"};
+  uint16_t errorValue = 65535;
+  uint16_t maxConsideredDistanceMm = 1000;
+  uint8_t consecutiveReadingsForTrigger = 4;
+  bool enableDebugDisplay = false;
+};
 
-  // --- Stepper Motor ---
-  constexpr uint8_t dirPinStepper = 41;
-  constexpr uint8_t enablePinStepper = 42;
-  constexpr uint8_t stepPinStepper = 40;
-  constexpr bool stepperEnableActiveLow = true;
-  constexpr bool limitSwitchActiveHigh = true;
-  constexpr int32_t stepsPerSecond = 17500;
-  constexpr int32_t acceleration = 17500;
-  constexpr int32_t expectedDoorClosePosition = 0;
-  constexpr int32_t seekIncrementSteps = 10;
+struct StepperConfig
+{
+  uint8_t dirPin = 41;
+  uint8_t enablePin = 42;
+  uint8_t stepPin = 40;
+  bool enableActiveLow = true;
+  int32_t stepsPerSecond = 17500;
+  int32_t acceleration = 17500;
+  int32_t expectedClosePosition = 0;
+  int32_t seekIncrementSteps = 10;
+};
 
-  // --- Misc ---
-  constexpr unsigned long SerialBaudRate = 115200;
-  constexpr int LimitSwitchDebounceMs = 2;
-  constexpr int SensorInitDelayMs = 10;
-  constexpr int SetupDelayMs = 2000;
-  constexpr unsigned long SensorReinitIntervalMs = 5UL * 60UL * 1000UL; // 5 minutes
-  constexpr unsigned long SensorStatusGracePeriodMs = 250; // allow sensor to settle after init
+struct TimingConfig
+{
+  unsigned long doorOpenHoldMs = 5000;
+  unsigned long sensorReinitIntervalMs = 5UL * 60UL * 1000UL;
+  unsigned long sensorStatusGracePeriodMs = 250;
+  int sensorInitDelayMs = 10;
+  int setupDelayMs = 2000;
+};
 
-  // --- Door Control ---
-  static constexpr unsigned long doorOpenHoldMs = 5000; // 5 seconds
-}
+struct MiscConfig
+{
+  unsigned long serialBaudRate = 115200;
+};
+
+struct ConfigData
+{
+  LimitSwitchConfig limitSwitches{};
+  OverrideSwitchConfig overrides{};
+  TofSensorConfig tof{};
+  StepperConfig stepper{};
+  TimingConfig timing{};
+  MiscConfig misc{};
+};
+
+extern const ConfigData Config;
 
 // --- Door State Enum ---
 enum class DoorState

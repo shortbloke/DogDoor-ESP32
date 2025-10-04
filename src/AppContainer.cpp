@@ -38,6 +38,8 @@ void AppContainer::begin()
   mqttSetup(&telemetry);  // MQTT client initialisation (connection handled in loop)
 
   ums3.setPixelColor(0, 255, 0);
+
+  diagnostics.begin(&door, &tofSensors, &connectivity);
 }
 
 void AppContainer::loop()
@@ -46,4 +48,5 @@ void AppContainer::loop()
   ArduinoOTA.handle();
   door.loop();
   mqttLoop();
+  diagnostics.loop();
 }

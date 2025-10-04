@@ -55,7 +55,7 @@ void DoorController::handleTofSensorStatus(uint8_t sensorIndex, bool ok, bool re
 
 void DoorController::setup()
 {
-  Serial.begin(Config::SerialBaudRate);
+  Serial.begin(Config.misc.serialBaudRate);
   SERIAL_PRINT("Setup Start\n");
 
   setupStepper();
@@ -101,8 +101,8 @@ void DoorController::setup()
   }
 
   // Setup override toggle switch
-  pinMode(Config::overrideKeepOpenSwitchPin, INPUT_PULLDOWN);
-  pinMode(Config::overrideKeepClosedSwitchPin, INPUT_PULLDOWN);
+  pinMode(Config.overrides.keepOpenPin, INPUT_PULLDOWN);
+  pinMode(Config.overrides.keepClosedPin, INPUT_PULLDOWN);
 
   SERIAL_PRINT("Setup END\n");
 
@@ -116,7 +116,7 @@ void DoorController::loop()
     debouncer.update();
   }
 
-  for (size_t i = 0; i < Config::numLimitSwitches; ++i)
+  for (size_t i = 0; i < Config.limitSwitches.count; ++i)
   {
     bool pressed = isLimitSwitchPressed(static_cast<LimitSwitch>(i));
     int8_t pressedVal = pressed ? 1 : 0;
@@ -184,6 +184,11 @@ float DoorController::getDistanceOutdoorCm() const
   return tofSensors->distanceCm(1);
 }
 
+DoorState DoorController::getCurrentState() const
+{
+  return stateMachine.current();
+}
+
 uint8_t DoorController::getLastSensorTriggered() const
 {
   return tofSensors ? tofSensors->lastTriggerId() : 0;
@@ -200,14 +205,14 @@ void DoorController::refreshStateDisplay()
 void DoorController::setupStepper()
 {
   engine.init();
-  stepper = engine.stepperConnectToPin(Config::stepPinStepper);
+  stepper = engine.stepperConnectToPin(Config.stepper.stepPin);
   if (stepper)
   {
-    stepper->setDirectionPin(Config::dirPinStepper);
-    stepper->setEnablePin(Config::enablePinStepper);
+    stepper->setDirectionPin(Config.stepper.dirPin);
+    stepper->setEnablePin(Config.stepper.enablePin);
     stepper->setAutoEnable(false);
-    stepper->setSpeedInHz(Config::stepsPerSecond);
-    stepper->setAcceleration(Config::acceleration);
+    stepper->setSpeedInHz(Config.stepper.stepsPerSecond);
+    stepper->setAcceleration(Config.stepper.acceleration);
     stepper->setCurrentPosition(0);
   }
   else
@@ -222,13 +227,13 @@ void DoorController::setupStepper()
 
 void DoorController::setupLimitSwitches()
 {
-  pinMode(Config::limitSwitchPins[BottomLimitSwitch], INPUT_PULLUP);
-  limitSwitchDebouncers[BottomLimitSwitch].attach(Config::limitSwitchPins[BottomLimitSwitch]);
-  limitSwitchDebouncers[BottomLimitSwitch].interval(Config::LimitSwitchDebounceMs);
+  pinMode(Config.limitSwitches.pins[BottomLimitSwitch], INPUT_PULLUP);
+  limitSwitchDebouncers[BottomLimitSwitch].attach(Config.limitSwitches.pins[BottomLimitSwitch]);
+  limitSwitchDebouncers[BottomLimitSwitch].interval(Config.limitSwitches.debounceMs);
 
-  pinMode(Config::limitSwitchPins[TopLimitSwitch], INPUT_PULLUP);
-  limitSwitchDebouncers[TopLimitSwitch].attach(Config::limitSwitchPins[TopLimitSwitch]);
-  limitSwitchDebouncers[TopLimitSwitch].interval(Config::LimitSwitchDebounceMs);
+  pinMode(Config.limitSwitches.pins[TopLimitSwitch], INPUT_PULLUP);
+  limitSwitchDebouncers[TopLimitSwitch].attach(Config.limitSwitches.pins[TopLimitSwitch]);
+  limitSwitchDebouncers[TopLimitSwitch].interval(Config.limitSwitches.debounceMs);
 }
 
 // -----------------------------------------------------------------------------
@@ -271,7 +276,7 @@ void DoorController::processSensorUpdate(const TofSensorManager::UpdateResult &u
 
 void DoorController::checkOverrideSwitches()
 {
-  const bool keepOpenActive = digitalRead(Config::overrideKeepOpenSwitchPin) == HIGH;
+  const bool keepOpenActive = digitalRead(Config.overrides.keepOpenPin) == HIGH;
   if (keepOpenActive && !keepOpen)
   {
     openDoor = true;
@@ -287,7 +292,7 @@ void DoorController::checkOverrideSwitches()
       stateMachine.transitionTo(DoorState::Closing, "Keep-open deactivated");
       fastClosing = true;
       displayedSeekBottomHint = false;
-      stepper->moveTo(Config::expectedDoorClosePosition, false);
+      stepper->moveTo(Config.stepper.expectedClosePosition, false);
     }
     else
     {
@@ -296,7 +301,7 @@ void DoorController::checkOverrideSwitches()
     SERIAL_PRINT("Override keep open switch deactivated. Resuming normal operation.\n");
   }
 
-  const bool keepClosedActive = digitalRead(Config::overrideKeepClosedSwitchPin) == HIGH;
+  const bool keepClosedActive = digitalRead(Config.overrides.keepClosedPin) == HIGH;
   if (keepClosedActive && !keepClosed)
   {
     openDoor = false;
@@ -308,7 +313,7 @@ void DoorController::checkOverrideSwitches()
         stateMachine.transitionTo(DoorState::Closing, "Keep-closed engaged");
         fastClosing = true;
         displayedSeekBottomHint = false;
-        stepper->moveTo(Config::expectedDoorClosePosition, false);
+        stepper->moveTo(Config.stepper.expectedClosePosition, false);
       }
       else
       {
@@ -407,7 +412,7 @@ void DoorController::handleOpeningState()
     }
     SERIAL_PRINT("Stepper stopped before reaching top limit, re-seeking top limit\n");
     SERIAL_PRINT("Current position: %d\n expected position: %d\n", stepper->getCurrentPosition(), expectedDoorOpenPosition);
-    seekLimitSwitch(1, Config::seekIncrementSteps);
+    seekLimitSwitch(1, Config.stepper.seekIncrementSteps);
   }
 }
 
@@ -424,7 +429,7 @@ void DoorController::handleOpenState()
     openStateEnteredMs = millis();
     return;
   }
-  if (millis() - openStateEnteredMs >= Config::doorOpenHoldMs)
+  if (millis() - openStateEnteredMs >= Config.timing.doorOpenHoldMs)
   {
     if (stepper)
     {
@@ -436,7 +441,7 @@ void DoorController::handleOpenState()
       stepper->enableOutputs();
       stateMachine.transitionTo(DoorState::Closing, "Hold period expired");
       displayedSeekBottomHint = false;
-      stepper->moveTo(Config::expectedDoorClosePosition, false);
+      stepper->moveTo(Config.stepper.expectedClosePosition, false);
       openStateFirstEntry = true;
     }
   }
@@ -453,8 +458,8 @@ void DoorController::handleClosingState()
   {
     stepper->forceStopAndNewPosition(0);
     stepper->disableOutputs();
-    digitalWrite(Config::enablePinStepper,
-                 Config::stepperEnableActiveLow ? HIGH : LOW);
+    digitalWrite(Config.stepper.enablePin,
+                 Config.stepper.enableActiveLow ? HIGH : LOW);
     SERIAL_PRINT("Bottom limit switch hit, stepper position set to 0. Door closed.\n");
     stateMachine.transitionTo(DoorState::Closed, "Bottom limit reached");
     displayedSeekBottomHint = false;
@@ -496,7 +501,7 @@ void DoorController::handleClosingState()
       displayService->showStatus("Seek bottom limit", true);
       displayedSeekBottomHint = true;
     }
-    seekLimitSwitch(-1, Config::seekIncrementSteps);
+    seekLimitSwitch(-1, Config.stepper.seekIncrementSteps);
   }
 }
 
@@ -515,13 +520,13 @@ void DoorController::showStateOnDisplay()
 bool DoorController::isLimitSwitchPressed(LimitSwitch sw)
 {
   int value = limitSwitchDebouncers[sw].read();
-  return value == (Config::limitSwitchActiveHigh ? HIGH : LOW);
+  return value == (Config.limitSwitches.activeHigh ? HIGH : LOW);
 }
 
 bool DoorController::isLimitSwitchPressedRaw(LimitSwitch sw) const
 {
-  int value = digitalRead(Config::limitSwitchPins[sw]);
-  return value == (Config::limitSwitchActiveHigh ? HIGH : LOW);
+  int value = digitalRead(Config.limitSwitches.pins[sw]);
+  return value == (Config.limitSwitches.activeHigh ? HIGH : LOW);
 }
 
 void DoorController::seekLimitSwitch(int direction, int steps)

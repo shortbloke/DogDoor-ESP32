@@ -55,17 +55,17 @@ static String lastDoorState = "";
 static unsigned long lastDistancePublish = 0;
 static uint32_t distancePublishIntervalMs = 30000; // default 30s
 static uint8_t lastSensorTriggerPublished = 0;
-static std::array<String, Config::numTOFSensors> tofStatusTopics;
-static std::array<String, Config::numTOFSensors> tofStatusDiscoveryTopics;
-static std::array<String, Config::numTOFSensors> tofStatusUniqueIds;
-static std::array<String, Config::numTOFSensors> tofStatusFriendlyNames;
-static std::array<int8_t, Config::numTOFSensors> tofStatusLatest;
-static std::array<int8_t, Config::numTOFSensors> tofStatusPublished;
-static std::array<String, Config::numTOFSensors> tofInitTopics;
-static std::array<String, Config::numTOFSensors> tofInitDiscoveryTopics;
-static std::array<String, Config::numTOFSensors> tofInitUniqueIds;
-static std::array<uint32_t, Config::numTOFSensors> tofInitCounters;
-static std::array<uint32_t, Config::numTOFSensors> tofInitPublished;
+static std::array<String, TofSensorConfig::count> tofStatusTopics;
+static std::array<String, TofSensorConfig::count> tofStatusDiscoveryTopics;
+static std::array<String, TofSensorConfig::count> tofStatusUniqueIds;
+static std::array<String, TofSensorConfig::count> tofStatusFriendlyNames;
+static std::array<int8_t, TofSensorConfig::count> tofStatusLatest;
+static std::array<int8_t, TofSensorConfig::count> tofStatusPublished;
+static std::array<String, TofSensorConfig::count> tofInitTopics;
+static std::array<String, TofSensorConfig::count> tofInitDiscoveryTopics;
+static std::array<String, TofSensorConfig::count> tofInitUniqueIds;
+static std::array<uint32_t, TofSensorConfig::count> tofInitCounters;
+static std::array<uint32_t, TofSensorConfig::count> tofInitPublished;
 static bool tofTopicsInitialized = false;
 
 static constexpr size_t kDiscoveryPayloadBufferSize = 320;
@@ -120,8 +120,8 @@ struct DiscoveryPayloadCache {
   char limitBottom[kDiscoveryPayloadBufferSize];
   char limitTop[kDiscoveryPayloadBufferSize];
   char sensorTrigger[kDiscoveryPayloadBufferSize];
-  std::array<std::array<char, kDiscoveryPayloadBufferSize>, Config::numTOFSensors> tofStatus{};
-  std::array<std::array<char, kDiscoveryPayloadBufferSize>, Config::numTOFSensors> tofInit{};
+  std::array<std::array<char, kDiscoveryPayloadBufferSize>, TofSensorConfig::count> tofStatus{};
+  std::array<std::array<char, kDiscoveryPayloadBufferSize>, TofSensorConfig::count> tofInit{};
 };
 
 static DiscoveryPayloadCache discoveryPayloads;
@@ -214,7 +214,7 @@ static void ensureDiscoveryPayloads() {
     kTopicAvailability,
     kDeviceObjectJson);
 
-  for (size_t i = 0; i < Config::numTOFSensors; ++i) {
+  for (size_t i = 0; i < Config.tof.count; ++i) {
     const char* friendly = tofStatusFriendlyNames[i].c_str();
     formatDiscoveryJson(
       discoveryPayloads.tofStatus[i].data(),
@@ -280,8 +280,8 @@ static void ensureTofTopicsInitialized() {
   if (tofTopicsInitialized) {
     return;
   }
-  for (size_t i = 0; i < Config::numTOFSensors; ++i) {
-    const char* name = Config::sensorNames[i];
+  for (size_t i = 0; i < Config.tof.count; ++i) {
+    const char* name = Config.tof.names[i];
     String slug = slugifySensorName(name);
     if (slug.length() == 0) {
       slug = String("sensor_") + i;
@@ -308,7 +308,7 @@ static void publishTofInitCount(size_t sensorIndex) {
   if (!mqttClient.connected()) {
     return;
   }
-  if (sensorIndex >= Config::numTOFSensors) {
+  if (sensorIndex >= Config.tof.count) {
     return;
   }
   if (tofInitPublished[sensorIndex] == tofInitCounters[sensorIndex]) {
@@ -377,7 +377,7 @@ void mqttPublishSensorTrigger(uint8_t triggerId) {
 
 void mqttPublishTOFSensorStatus(uint8_t sensorIndex, bool measurementOk) {
   ensureTofTopicsInitialized();
-  if (sensorIndex >= Config::numTOFSensors) {
+  if (sensorIndex >= Config.tof.count) {
     return;
   }
 
@@ -406,7 +406,7 @@ void mqttSetDistancePublishInterval(uint32_t ms) {
 
 void mqttPublishTOFInit(uint8_t sensorIndex) {
   ensureTofTopicsInitialized();
-  if (sensorIndex >= Config::numTOFSensors) {
+  if (sensorIndex >= Config.tof.count) {
     return;
   }
   ++tofInitCounters[sensorIndex];
@@ -440,7 +440,7 @@ static void publishDiscovery() {
   ok &= publishIfChanged(kDiscoveryLimitTopConfig, discoveryPayloads.limitTop, publishedPayloads.limitTop);
   ok &= publishIfChanged(kDiscoverySensorTriggerConfig, discoveryPayloads.sensorTrigger, publishedPayloads.sensorTrigger);
 
-  for (size_t i = 0; i < Config::numTOFSensors; ++i) {
+  for (size_t i = 0; i < Config.tof.count; ++i) {
     ok &= publishIfChanged(tofStatusDiscoveryTopics[i].c_str(), discoveryPayloads.tofStatus[i].data(), publishedPayloads.tofStatus[i].data());
     ok &= publishIfChanged(tofInitDiscoveryTopics[i].c_str(), discoveryPayloads.tofInit[i].data(), publishedPayloads.tofInit[i].data());
   }
@@ -483,7 +483,7 @@ static void mqttReconnect() {
         mqttPublishLimitSwitchTop(!telemetry->isLimitSwitchPressed(TopLimitSwitch));
         mqttPublishSensorTrigger(triggerId);
       }
-      for (size_t i = 0; i < Config::numTOFSensors; ++i) {
+      for (size_t i = 0; i < Config.tof.count; ++i) {
         if (tofStatusLatest[i] != -1) {
           tofStatusPublished[i] = -1;
           mqttPublishTOFSensorStatus(i, tofStatusLatest[i] == 1);
