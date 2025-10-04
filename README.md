@@ -127,7 +127,7 @@ limit switch readings, and TOF ranges/health.
 Contributions and feedback are always welcome. Submit pull requests or open issues with detailed descriptions of your
 use case.
 
-License information can be added here once defined.
+DogDoor-ESP32 is released under the MIT License. See [`LICENSE`](LICENSE) for the full terms.
 
 ---
 
