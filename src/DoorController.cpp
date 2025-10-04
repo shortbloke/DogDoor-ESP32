@@ -3,7 +3,6 @@
 #include "mqtt.h"
 #include <Arduino.h>
 #include <UMS3.h>
-#include <WiFi.h>
 
 // Serial debug print macro. Configured via platformio.ini
 #ifdef SERIAL_PRINT_ENABLE
@@ -133,17 +132,6 @@ void DoorController::loop()
         mqttPublishLimitSwitchTop(!pressed); // invert for MQTT wiring polarity
       }
     }
-  }
-
-  unsigned long now = millis();
-  if (now - lastWiFiCheckMs >= wifiCheckIntervalMs)
-  {
-    wifiConnected = (WiFi.status() == WL_CONNECTED);
-    if (displayService)
-    {
-      displayService->setWiFiConnected(wifiConnected);
-    }
-    lastWiFiCheckMs = now;
   }
 
   if (tofSensors)

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <pgmspace.h>
 #include "Secrets.h"
 #include "DisplayHelpers.h"
 
@@ -68,12 +69,47 @@ static std::array<uint32_t, Config::numTOFSensors> tofInitPublished;
 static bool tofTopicsInitialized = false;
 
 static constexpr size_t kDiscoveryPayloadBufferSize = 320;
-static constexpr char kDeviceObjectJson[] =
+static const char kDeviceObjectJson[] PROGMEM =
   "{\"identifiers\":[\"dogdoor_esp32\"],"
   "\"name\":\"Dog Door\","
   "\"manufacturer\":\"Martin Rowan\","
   "\"model\":\"ESP32\","
   "\"sw_version\":\"1.0.0\"}";
+
+static const char kDoorTemplate[] PROGMEM =
+  "{\"name\":\"Dog Door\",\"unique_id\":\"dogdoor_door\",\"device_class\":\"door\","
+  "\"state_topic\":\"%s\",\"payload_on\":\"OPEN\",\"payload_off\":\"CLOSED\","
+  "\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+  "\"device\":%s}";
+
+static const char kDoorStateTemplate[] PROGMEM =
+  "{\"name\":\"Dog Door State\",\"unique_id\":\"dogdoor_state\",\"state_topic\":\"%s\","
+  "\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+  "\"icon\":\"mdi:door\",\"device\":%s}";
+
+static const char kDistanceTemplate[] PROGMEM =
+  "{\"name\":\"Dog Door Distance %s\",\"unique_id\":\"dogdoor_distance_%s\",\"device_class\":\"distance\","
+  "\"state_class\":\"measurement\",\"unit_of_measurement\":\"cm\",\"state_topic\":\"%s\",\"availability_topic\":\"%s\","
+  "\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}";
+
+static const char kLimitTemplate[] PROGMEM =
+  "{\"name\":\"Dog Door Limit %s\",\"unique_id\":\"dogdoor_limit_%s\",\"device_class\":\"door\","
+  "\"state_topic\":\"%s\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"availability_topic\":\"%s\","
+  "\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}";
+
+static const char kSensorTriggerTemplate[] PROGMEM =
+  "{\"name\":\"Dog Door Sensor Trigger\",\"unique_id\":\"dogdoor_sensor_trigger\",\"state_topic\":\"%s\","
+  "\"json_attributes_topic\":\"dogdoor/sensor_trigger_distance\",\"availability_topic\":\"%s\","
+  "\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"icon\":\"mdi:arrow-decision\",\"device\":%s}";
+
+static const char kTofStatusTemplate[] PROGMEM =
+  "{\"name\":\"Dog Door %s TOF Status\",\"unique_id\":\"%s\",\"device_class\":\"problem\",\"state_topic\":\"%s\","
+  "\"payload_on\":\"%s\",\"payload_off\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\","
+  "\"payload_not_available\":\"offline\",\"device\":%s}";
+
+static const char kTofInitTemplate[] PROGMEM =
+  "{\"name\":\"Dog Door %s TOF Init Count\",\"unique_id\":\"%s\",\"state_topic\":\"%s\",\"availability_topic\":\"%s\","
+  "\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"unit_of_measurement\":\"count\",\"icon\":\"mdi:counter\",\"device\":%s}";
 
 struct DiscoveryPayloadCache {
   bool initialised = false;
@@ -89,16 +125,18 @@ struct DiscoveryPayloadCache {
 };
 
 static DiscoveryPayloadCache discoveryPayloads;
+static DiscoveryPayloadCache publishedPayloads;
+static bool publishedPayloadsValid = false;
 
 static void ensureTofTopicsInitialized();
-
-static void formatDiscoveryJson(char* buffer, size_t len, const char* fmt, ...) {
+ 
+static void formatDiscoveryJson(char* buffer, size_t len, PGM_P fmt, ...) {
   if (!buffer || len == 0) {
     return;
   }
   va_list args;
   va_start(args, fmt);
-  int written = vsnprintf(buffer, len, fmt, args);
+  int written = vsnprintf_P(buffer, len, fmt, args);
   va_end(args);
   if (written < 0 || static_cast<size_t>(written) >= len) {
     SERIAL_PRINT("[MQTT] Discovery payload truncated\n");
@@ -115,7 +153,7 @@ static void ensureDiscoveryPayloads() {
   formatDiscoveryJson(
     discoveryPayloads.door,
     sizeof(discoveryPayloads.door),
-    "{\"name\":\"Dog Door\",\"unique_id\":\"dogdoor_door\",\"device_class\":\"door\",\"state_topic\":\"%s\",\"payload_on\":\"OPEN\",\"payload_off\":\"CLOSED\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+    kDoorTemplate,
     kTopicDoorState,
     kTopicAvailability,
     kDeviceObjectJson);
@@ -123,7 +161,7 @@ static void ensureDiscoveryPayloads() {
   formatDiscoveryJson(
     discoveryPayloads.doorState,
     sizeof(discoveryPayloads.doorState),
-    "{\"name\":\"Dog Door State\",\"unique_id\":\"dogdoor_state\",\"state_topic\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"icon\":\"mdi:door\",\"device\":%s}",
+    kDoorStateTemplate,
     kTopicDoorStateActual,
     kTopicAvailability,
     kDeviceObjectJson);
@@ -131,7 +169,9 @@ static void ensureDiscoveryPayloads() {
   formatDiscoveryJson(
     discoveryPayloads.distanceIndoor,
     sizeof(discoveryPayloads.distanceIndoor),
-    "{\"name\":\"Dog Door Distance Indoor\",\"unique_id\":\"dogdoor_distance_indoor\",\"device_class\":\"distance\",\"state_class\":\"measurement\",\"unit_of_measurement\":\"cm\",\"state_topic\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+    kDistanceTemplate,
+    "Indoor",
+    "indoor",
     kTopicDistanceIndoor,
     kTopicAvailability,
     kDeviceObjectJson);
@@ -139,7 +179,9 @@ static void ensureDiscoveryPayloads() {
   formatDiscoveryJson(
     discoveryPayloads.distanceOutdoor,
     sizeof(discoveryPayloads.distanceOutdoor),
-    "{\"name\":\"Dog Door Distance Outdoor\",\"unique_id\":\"dogdoor_distance_outdoor\",\"device_class\":\"distance\",\"state_class\":\"measurement\",\"unit_of_measurement\":\"cm\",\"state_topic\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+    kDistanceTemplate,
+    "Outdoor",
+    "outdoor",
     kTopicDistanceOutdoor,
     kTopicAvailability,
     kDeviceObjectJson);
@@ -147,7 +189,9 @@ static void ensureDiscoveryPayloads() {
   formatDiscoveryJson(
     discoveryPayloads.limitBottom,
     sizeof(discoveryPayloads.limitBottom),
-    "{\"name\":\"Dog Door Limit Bottom\",\"unique_id\":\"dogdoor_limit_bottom\",\"device_class\":\"door\",\"state_topic\":\"%s\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+    kLimitTemplate,
+    "Bottom",
+    "bottom",
     kTopicLimitBottom,
     kTopicAvailability,
     kDeviceObjectJson);
@@ -155,7 +199,9 @@ static void ensureDiscoveryPayloads() {
   formatDiscoveryJson(
     discoveryPayloads.limitTop,
     sizeof(discoveryPayloads.limitTop),
-    "{\"name\":\"Dog Door Limit Top\",\"unique_id\":\"dogdoor_limit_top\",\"device_class\":\"door\",\"state_topic\":\"%s\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+    kLimitTemplate,
+    "Top",
+    "top",
     kTopicLimitTop,
     kTopicAvailability,
     kDeviceObjectJson);
@@ -163,7 +209,7 @@ static void ensureDiscoveryPayloads() {
   formatDiscoveryJson(
     discoveryPayloads.sensorTrigger,
     sizeof(discoveryPayloads.sensorTrigger),
-    "{\"name\":\"Dog Door Sensor Trigger\",\"unique_id\":\"dogdoor_sensor_trigger\",\"state_topic\":\"%s\",\"json_attributes_topic\":\"dogdoor/sensor_trigger_distance\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"icon\":\"mdi:arrow-decision\",\"device\":%s}",
+    kSensorTriggerTemplate,
     kTopicSensorTrigger,
     kTopicAvailability,
     kDeviceObjectJson);
@@ -173,7 +219,7 @@ static void ensureDiscoveryPayloads() {
     formatDiscoveryJson(
       discoveryPayloads.tofStatus[i].data(),
       discoveryPayloads.tofStatus[i].size(),
-      "{\"name\":\"Dog Door %s TOF Status\",\"unique_id\":\"%s\",\"device_class\":\"problem\",\"state_topic\":\"%s\",\"payload_on\":\"%s\",\"payload_off\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+      kTofStatusTemplate,
       friendly,
       tofStatusUniqueIds[i].c_str(),
       tofStatusTopics[i].c_str(),
@@ -185,7 +231,7 @@ static void ensureDiscoveryPayloads() {
     formatDiscoveryJson(
       discoveryPayloads.tofInit[i].data(),
       discoveryPayloads.tofInit[i].size(),
-      "{\"name\":\"Dog Door %s TOF Init Count\",\"unique_id\":\"%s\",\"state_topic\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"unit_of_measurement\":\"count\",\"icon\":\"mdi:counter\",\"device\":%s}",
+      kTofInitTemplate,
       friendly,
       tofInitUniqueIds[i].c_str(),
       tofInitTopics[i].c_str(),
@@ -374,20 +420,33 @@ static void publishDiscovery() {
   ensureDiscoveryPayloads();
 
   bool ok = true;
-  ok &= publishRetained(kDiscoveryDoorConfig, discoveryPayloads.door);
-  ok &= publishRetained(kDiscoveryDoorStateConfig, discoveryPayloads.doorState);
-  ok &= publishRetained(kDiscoveryDistanceIndoorConfig, discoveryPayloads.distanceIndoor);
-  ok &= publishRetained(kDiscoveryDistanceOutdoorConfig, discoveryPayloads.distanceOutdoor);
-  ok &= publishRetained(kDiscoveryLimitBottomConfig, discoveryPayloads.limitBottom);
-  ok &= publishRetained(kDiscoveryLimitTopConfig, discoveryPayloads.limitTop);
-  ok &= publishRetained(kDiscoverySensorTriggerConfig, discoveryPayloads.sensorTrigger);
+  auto publishIfChanged = [&](const char *topic, const char *payload, char *publishedBuffer) {
+    if (!publishedPayloadsValid || std::strcmp(publishedBuffer, payload) != 0) {
+      if (publishRetained(topic, payload)) {
+        std::strncpy(publishedBuffer, payload, kDiscoveryPayloadBufferSize - 1);
+        publishedBuffer[kDiscoveryPayloadBufferSize - 1] = '\0';
+        return true;
+      }
+      return false;
+    }
+    return true;
+  };
+
+  ok &= publishIfChanged(kDiscoveryDoorConfig, discoveryPayloads.door, publishedPayloads.door);
+  ok &= publishIfChanged(kDiscoveryDoorStateConfig, discoveryPayloads.doorState, publishedPayloads.doorState);
+  ok &= publishIfChanged(kDiscoveryDistanceIndoorConfig, discoveryPayloads.distanceIndoor, publishedPayloads.distanceIndoor);
+  ok &= publishIfChanged(kDiscoveryDistanceOutdoorConfig, discoveryPayloads.distanceOutdoor, publishedPayloads.distanceOutdoor);
+  ok &= publishIfChanged(kDiscoveryLimitBottomConfig, discoveryPayloads.limitBottom, publishedPayloads.limitBottom);
+  ok &= publishIfChanged(kDiscoveryLimitTopConfig, discoveryPayloads.limitTop, publishedPayloads.limitTop);
+  ok &= publishIfChanged(kDiscoverySensorTriggerConfig, discoveryPayloads.sensorTrigger, publishedPayloads.sensorTrigger);
 
   for (size_t i = 0; i < Config::numTOFSensors; ++i) {
-    ok &= publishRetained(tofStatusDiscoveryTopics[i].c_str(), discoveryPayloads.tofStatus[i].data());
-    ok &= publishRetained(tofInitDiscoveryTopics[i].c_str(), discoveryPayloads.tofInit[i].data());
+    ok &= publishIfChanged(tofStatusDiscoveryTopics[i].c_str(), discoveryPayloads.tofStatus[i].data(), publishedPayloads.tofStatus[i].data());
+    ok &= publishIfChanged(tofInitDiscoveryTopics[i].c_str(), discoveryPayloads.tofInit[i].data(), publishedPayloads.tofInit[i].data());
   }
 
   if (ok) {
+    publishedPayloadsValid = true;
     discoveryPublished = true;
   }
 }

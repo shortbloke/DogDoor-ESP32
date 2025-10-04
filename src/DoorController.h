@@ -46,10 +46,6 @@ public:
   void handleTofSensorStatus(uint8_t sensorIndex, bool ok, bool reportInitEvent);
 
 private:
-  // WiFi status check timing
-  unsigned long lastWiFiCheckMs = 0;
-  static constexpr unsigned long wifiCheckIntervalMs = 30000; // 30 seconds
-
   // --- State for display icons ---
   bool wifiConnected = false;
 
