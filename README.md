@@ -6,6 +6,8 @@ movement, dual VL53L0X time-of-flight sensors, limit switches, Wi-Fi
 connectivity, MQTT telemetry, and an OLED status display. The project is built
 with PlatformIO on top of the Arduino framework.
 
+This is based on my earlier [Particle Photon DogDoor](https://github.com/shortbloke/DogDoor) project.
+
 ## Features
 
 - **Sensor-aware door control** – polls indoor/outdoor VL53L0X sensors,
