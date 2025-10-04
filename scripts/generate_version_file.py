@@ -34,12 +34,6 @@ def _run_git_command(args: list[str]) -> str | None:
     return output or None
 
 
-def _remove_suffix(value: str, suffix: str) -> str:
-    if value.endswith(suffix):
-        return value[: -len(suffix)]
-    return value
-
-
 def _load_previous_version() -> str:
     if not STATE_PATH.exists():
         return FALLBACK_VERSION
