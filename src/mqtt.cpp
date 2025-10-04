@@ -68,7 +68,9 @@ static std::array<uint32_t, TofSensorConfig::count> tofInitCounters;
 static std::array<uint32_t, TofSensorConfig::count> tofInitPublished;
 static bool tofTopicsInitialized = false;
 
-static constexpr size_t kDiscoveryPayloadBufferSize = 320;
+// Longest discovery payload is just over 450 bytes once the shared device
+// metadata is injected, so give ourselves plenty of headroom.
+static constexpr size_t kDiscoveryPayloadBufferSize = 512;
 static const char kDeviceObjectJson[] PROGMEM =
   "{\"identifiers\":[\"dogdoor_esp32\"],"
   "\"name\":\"Dog Door\","
