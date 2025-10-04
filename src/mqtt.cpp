@@ -54,7 +54,6 @@ static DoorTelemetryProvider *telemetry = nullptr;
 static bool discoveryPublished = false;
 static String lastDoorState = "";
 static unsigned long lastDistancePublish = 0;
-static uint32_t distancePublishIntervalMs = 30000; // default 30s
 static uint8_t lastSensorTriggerPublished = 0;
 static std::array<String, TofSensorConfig::count> tofStatusTopics;
 static std::array<String, TofSensorConfig::count> tofStatusDiscoveryTopics;
@@ -68,6 +67,7 @@ static std::array<String, TofSensorConfig::count> tofInitUniqueIds;
 static std::array<uint32_t, TofSensorConfig::count> tofInitCounters;
 static std::array<uint32_t, TofSensorConfig::count> tofInitPublished;
 static bool tofTopicsInitialized = false;
+static constexpr uint32_t kDistancePublishIntervalMs = 30000; // default 30s
 
 // Longest discovery payload is just over 450 bytes once the shared device
 // metadata is injected, so give ourselves plenty of headroom.
@@ -443,10 +443,6 @@ void mqttPublishTOFSensorStatus(uint8_t sensorIndex, bool measurementOk) {
   }
 }
 
-void mqttSetDistancePublishInterval(uint32_t ms) {
-  distancePublishIntervalMs = ms;
-}
-
 void mqttPublishTOFInit(uint8_t sensorIndex) {
   ensureTofTopicsInitialized();
   if (sensorIndex >= Config.tof.count) {
@@ -581,7 +577,7 @@ void mqttLoop() {
   }
   // Periodic distance publish
   unsigned long now = millis();
-  if (now - lastDistancePublish >= distancePublishIntervalMs) {
+  if (now - lastDistancePublish >= kDistancePublishIntervalMs) {
     publishAllDistances();
     lastDistancePublish = now;
   }

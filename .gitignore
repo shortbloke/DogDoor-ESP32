@@ -8,3 +8,4 @@
 .DS_Store
 Secrets.h
 private.ini
+src/Version.h
