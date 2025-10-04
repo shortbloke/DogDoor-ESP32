@@ -24,17 +24,21 @@ with PlatformIO on top of the Arduino framework.
 
 ```
 ├── src/
-│   ├── AppContainer.cpp/h        # Top-level wiring of services and main loop
-│   ├── Config.cpp/h              # Structured configuration data
-│   ├── ConnectivityManager.cpp/h # Wi-Fi, OTA lifecycle management
-│   ├── DiagnosticsService.cpp/h  # Serial diagnostics channel
-│   ├── DoorController.cpp/h      # Core door state machine and hardware facade
-│   ├── DoorStateMachine.cpp/h    # Reusable transition helper
-│   ├── DisplayService.cpp/h      # Display driver facade (replaces globals)
-│   ├── mqtt.cpp/h                # MQTT client, HA discovery payloads
-│   ├── TofSensorManager.cpp/h    # VL53L0X orchestration, health tracking
-│   └── ...                       # Supporting telemetry/provider headers
-├── platformio.ini                # PlatformIO environments
+│   ├── AppContainer.cpp/h        # AppContainer ownership graph and lifecycle hooks
+│   ├── Config.cpp/h              # ConfigData defaults, persistent structs, pin maps
+│   ├── ConnectivityManager.cpp/h # Wi-Fi, OTA, and status propagation interface
+│   ├── DiagnosticsService.cpp/h  # Serial diagnostics command handling
+│   ├── DisplayHelpers.cpp/h      # OLED drawing helper implementations and APIs
+│   ├── DisplayService.cpp/h      # Display service logic, fonts, and interface
+│   ├── DoorController.cpp/h      # Door controller orchestration and collaborators
+│   ├── DoorStateMachine.cpp/h    # Door state transitions and event dispatch
+│   ├── DoorTelemetryProvider.h   # Shared telemetry payload structures
+│   ├── IconBitmaps.h             # Bitmap assets for status icons
+│   ├── mqtt.cpp/h                # MQTT topics, payload builders, and interface
+│   ├── TofSensorManager.cpp/h    # VL53L0X manager coordination and sensor structs
+│   ├── main.cpp                  # Arduino entry point delegating to AppContainer
+│   └── Secrets example.h         # Template for Wi-Fi/MQTT credentials
+├── platformio.ini               # PlatformIO environments
 └── README.md
 ```
 
