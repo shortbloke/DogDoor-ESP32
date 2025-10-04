@@ -343,12 +343,14 @@ static void publishDiscovery() {
       "\"name\":\"Dog Door Sensor Trigger\","
       "\"unique_id\":\"dogdoor_sensor_trigger\","
       "\"state_topic\":\"") + kTopicSensorTrigger + "\","
+      "\"json_attributes_topic\":\"dogdoor/sensor_trigger_distance\","
       "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
       "\"payload_available\":\"online\","
       "\"payload_not_available\":\"offline\","
       "\"icon\":\"mdi:arrow-decision\","
       "\"device\":" + deviceObj +
     "}";
+
 
   bool ok = true;
   ok &= publishRetained(kDiscoveryDoorConfig, doorPayload);

@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <UMS3.h>
 #include <WiFi.h>
+#include <cstring>
 
 // Serial debug print macro. Configured via platformio.ini
 #ifdef SERIAL_PRINT_ENABLE
@@ -50,7 +51,7 @@ void DoorController::setup()
     delay(Config::SetupDelayMs / 2);
   }
   SERIAL_PRINT("VL53L0X Sensors initialized successfully\n");
-  updateSensorStates(true);
+  updateSensorStates();
   SERIAL_PRINT("Indoor sensor range: %d mm\n", range[0]);
   SERIAL_PRINT("Outdoor sensor range: %d mm\n", range[1]);
   DisplayHelpers::showStatus(display, "VL53L0X Sensors ready");
@@ -109,9 +110,7 @@ void DoorController::loop()
   }
 
   checkOverrideSwitches();
-
-  const bool doorTriggersAllowed = !keepClosed && !keepOpen;
-  updateSensorStates(doorTriggersAllowed);
+  updateSensorStates();
   handleState();
 
   if (sensorInitNeeded)
@@ -148,7 +147,7 @@ void DoorController::refreshStateDisplay()
 
 const char* DoorController::getStateString() const {
     if (keepOpen)   return "KEEP OPEN";
-    if (keepClosed) return "KEEP CLOSED";
+    if (keepClosed) return "LOCKED";
     switch (state) {
       case DoorState::Open:     return "OPEN";
       case DoorState::Closed:   return "CLOSED";
@@ -195,74 +194,112 @@ void DoorController::setupStepper()
   }
 }
 
+void DoorController::publishSensorStatus(uint8_t sensorIndex, bool ok, bool reportInitEvent)
+{
+  mqttPublishTOFSensorStatus(sensorIndex, ok);
+  if (ok && reportInitEvent)
+  {
+    mqttPublishTOFInit(sensorIndex);
+  }
+}
+
 bool DoorController::setupTOFSensors()
 {
-  Wire.begin(Config::SDA, Config::SCL, 400000);
-  for (size_t i = 0; i < Config::numTOFSensors; ++i)
-  {
-    pinMode(Config::xshutPins[i], OUTPUT);
-    digitalWrite(Config::xshutPins[i], LOW);
-    sensorReady[i] = false;
-  }
-  for (size_t i = 0; i < Config::numTOFSensors; ++i)
-  {
-    pinMode(Config::xshutPins[i], INPUT);
-    delay(Config::SensorInitDelayMs);
-    auto &sensor = sensors[i];
-    sensor.setTimeout(Config::TOFSensorTimeout);
-    if (!sensor.init())
-    {
-      SERIAL_PRINT("%s sensor failed to initialize!\n", Config::sensorNames[i]);
-      char errorMsg[64];
-      snprintf(errorMsg, sizeof(errorMsg), "ERROR:%s sensor failed!", Config::sensorNames[i]);
-      DisplayHelpers::showStatus(display, errorMsg, true, 1);
-      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
-      return false;
-    }
-    else
-    {
-      sensor.setAddress(Config::TOFSensorStartAddress + i);
-      sensor.setMeasurementTimingBudget(Config::TOFSensorTimeMeasurementBudget);
-      sensor.startContinuous();
-      SERIAL_PRINT("%s sensor initialized at address: 0x%X\n", Config::sensorNames[i], sensor.getAddress());
-      char statusMsg[64];
-      snprintf(statusMsg, sizeof(statusMsg), "%s sensor at 0x%X", Config::sensorNames[i], sensor.getAddress());
-      DisplayHelpers::showStatus(display, statusMsg);
-      sensorReady[i] = true;
-      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), true);
-      mqttPublishTOFInit(static_cast<uint8_t>(i));
-    }
-  }
-  SERIAL_PRINT("VL53L0X sensors initialized\n");
-  lastSensorInitMs = millis();
-  return true;
+  return initializeTOFSensors(false);
 }
 
 bool DoorController::reinitTOFSensors()
 {
-  bool success = true;
+  SERIAL_PRINT("Re-initializing VL53L0X sensors...\n");
+  return initializeTOFSensors(true);
+}
+
+bool DoorController::initializeTOFSensors(bool isReinit)
+{
+  Wire.begin(Config::SDA, Config::SCL, 400000);
+
   for (size_t i = 0; i < Config::numTOFSensors; ++i)
   {
+    if (isReinit)
+    {
+      sensors[i].stopContinuous();
+    }
+    pinMode(Config::xshutPins[i], OUTPUT);
+    digitalWrite(Config::xshutPins[i], LOW);
+    sensorReady[i] = false;
+    sensorBelowThreshold[i] = false;
+    sensorBelowStreak[i] = 0;
+    range[i] = 0;
+    sensorStatusSuppressUntil[i] = millis() + sensorStatusGracePeriodMs;
+  }
+
+  if (isReinit)
+  {
+    for (size_t i = 0; i < Config::numTOFSensors; ++i)
+    {
+      sensors[i] = VL53L0X(); // reset stored I2C address back to the default 0x29
+      sensors[i].setBus(&Wire);
+    }
+  }
+
+  delay(Config::SensorInitDelayMs);
+
+  bool success = true;
+
+  for (size_t i = 0; i < Config::numTOFSensors; ++i)
+  {
+    pinMode(Config::xshutPins[i], INPUT);
+    delay(Config::SensorInitDelayMs);
+
     auto &sensor = sensors[i];
+    sensor.setBus(&Wire);
+    sensor.setTimeout(Config::TOFSensorTimeout);
     if (!sensor.init())
     {
-      SERIAL_PRINT("%s sensor re-init failed!\n", Config::sensorNames[i]);
+      SERIAL_PRINT("%s sensor %sinit failed!\n", Config::sensorNames[i], isReinit ? "re-" : "");
+      if (!isReinit)
+      {
+        char errorMsg[64];
+        snprintf(errorMsg, sizeof(errorMsg), "ERROR:%s sensor failed!", Config::sensorNames[i]);
+        DisplayHelpers::showStatus(display, errorMsg, true, 1);
+        mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
+        return false;
+      }
       sensorReady[i] = false;
+      sensorBelowStreak[i] = 0;
       success = false;
-      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
+      publishSensorStatus(static_cast<uint8_t>(i), false);
+      sensorStatusSuppressUntil[i] = 0;
+      continue;
     }
-    else
+
+    sensor.setAddress(Config::TOFSensorStartAddress + i);
+    sensor.setMeasurementTimingBudget(Config::TOFSensorTimeMeasurementBudget);
+    sensor.startContinuous();
+
+    sensorReady[i] = true;
+    sensorBelowThreshold[i] = false;
+    sensorBelowStreak[i] = 0;
+    range[i] = 0;
+    sensorStatusSuppressUntil[i] = millis() + sensorStatusGracePeriodMs;
+    SERIAL_PRINT("%s sensor %sinitialized at address: 0x%X\n", Config::sensorNames[i], isReinit ? "re-" : "", sensor.getAddress());
+
+    if (!isReinit)
     {
-      sensorReady[i] = true;
-      SERIAL_PRINT("%s sensor re-init succeeded\n", Config::sensorNames[i]);
-      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), true);
-      mqttPublishTOFInit(static_cast<uint8_t>(i));
+      char statusMsg[64];
+      snprintf(statusMsg, sizeof(statusMsg), "%s sensor at 0x%X", Config::sensorNames[i], sensor.getAddress());
+      DisplayHelpers::showStatus(display, statusMsg);
     }
+
+    publishSensorStatus(static_cast<uint8_t>(i), true, true);
   }
+
   if (success)
   {
+    SERIAL_PRINT("VL53L0X sensors %sinitialized\n", isReinit ? "re-" : "");
     lastSensorInitMs = millis();
   }
+
   return success;
 }
 void DoorController::setupLimitSwitches()
@@ -279,37 +316,49 @@ void DoorController::setupLimitSwitches()
 // -----------------------------------------------------------------------------
 // Sensor Helpers
 // -----------------------------------------------------------------------------
-void DoorController::updateSensorStates(bool allowDoorTrigger)
+void DoorController::updateSensorStates()
 {
-  bool anySensorBelow = false;
+  bool anySensorQualified = false;
   bool triggerEvent = false;
   uint8_t triggerSensorId = 0;
+  unsigned long now = millis();
   for (size_t i = 0; i < Config::numTOFSensors; ++i)
   {
+    bool withinGrace = now < sensorStatusSuppressUntil[i];
     if (!sensorReady[i])
     {
-      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
+      if (!withinGrace)
+      {
+        publishSensorStatus(static_cast<uint8_t>(i), false);
+      }
       continue;
     }
 
     auto &sensor = sensors[i];
     range[i] = sensor.readRangeContinuousMillimeters();
+    if (withinGrace)
+    {
+      (void)sensor.timeoutOccurred();
+      sensorBelowThreshold[i] = false;
+      sensorBelowStreak[i] = 0;
+      continue;
+    }
     if (sensor.timeoutOccurred())
     {
       SERIAL_PRINT("%s sensor timeout, skipping...\n", Config::sensorNames[i]);
-      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
+      publishSensorStatus(static_cast<uint8_t>(i), false);
       continue;
     }
     else if (sensor.last_status != 0)
     {
       SERIAL_PRINT("%s sensor error %d, skipping...\n", Config::sensorNames[i], sensor.last_status);
-      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
+      publishSensorStatus(static_cast<uint8_t>(i), false);
       continue;
     }
     else if (range[i] == 0)
     {
       SERIAL_PRINT("%s sensor failed to read, skipping...\n", Config::sensorNames[i]);
-      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
+      publishSensorStatus(static_cast<uint8_t>(i), false);
       continue;
     }
     else if (range[i] == Config::TOFSensorErrorValue)
@@ -317,42 +366,109 @@ void DoorController::updateSensorStates(bool allowDoorTrigger)
       SERIAL_PRINT("%s sensor not found, scheduling re-initialization...\n", Config::sensorNames[i]);
       sensorInitNeeded = true;
       sensorReady[i] = false;
-      mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), false);
+      sensorBelowStreak[i] = 0;
+      sensorStatusSuppressUntil[i] = millis() + sensorStatusGracePeriodMs;
+      publishSensorStatus(static_cast<uint8_t>(i), false);
       continue;
     }
-    mqttPublishTOFSensorStatus(static_cast<uint8_t>(i), true);
-    // Check if the reading is below the threshold to trigger door opening
+    publishSensorStatus(static_cast<uint8_t>(i), true);
+    if (range[i] > Config::TOFSensorMaxConsideredDistanceMm)
+    {
+      sensorBelowThreshold[i] = false;
+      sensorBelowStreak[i] = 0;
+      continue;
+    }
+
     bool below = range[i] < Config::rangeThreshold[i];
     if (below)
     {
-      anySensorBelow = true;
-      if (!sensorBelowThreshold[i])
+      uint8_t &streak = sensorBelowStreak[i];
+      if (streak < Config::TOFSensorTriggerConsecutiveReadings)
       {
-        triggerEvent = true;
-        triggerSensorId = (i == 0) ? 1 : 2; // 1 = indoor, 2 = outdoor
-        float cm = range[i] / 10.0f;
-        if (i == 0)
+        ++streak;
+      }
+
+      if (streak >= Config::TOFSensorTriggerConsecutiveReadings)
+      {
+        anySensorQualified = true;
+        if (!sensorBelowThreshold[i])
         {
-          mqttPublishDistanceIndoor(cm);
+          triggerEvent = true;
+          triggerSensorId = (i == 0) ? 1 : 2; // 1 = indoor, 2 = outdoor
+          float cm = range[i] / 10.0f;
+          if (i == 0)
+          {
+            mqttPublishDistanceIndoor(cm);
+          }
+          else
+          {
+            mqttPublishDistanceOutdoor(cm);
+          }
+          mqttPublishSensorTrigger(triggerSensorId);
+          SERIAL_PRINT("%s sensor detected an object at %d mm\n", Config::sensorNames[i], range[i]);
         }
-        else
-        {
-          mqttPublishDistanceOutdoor(cm);
-        }
-        mqttPublishSensorTrigger(triggerSensorId);
-        SERIAL_PRINT("%s sensor detected an object at %d mm\n", Config::sensorNames[i], range[i]);
+        sensorBelowThreshold[i] = true;
+      }
+      else
+      {
+        sensorBelowThreshold[i] = false;
       }
     }
-    sensorBelowThreshold[i] = below;
+    else
+    {
+      sensorBelowStreak[i] = 0;
+      sensorBelowThreshold[i] = false;
+    }
   }
   if (triggerEvent)
   {
     lastSensorTriggered = triggerSensorId;
     DisplayHelpers::setLastSensorTriggered(lastSensorTriggered);
   }
-  if (allowDoorTrigger)
+  if (keepClosed)
   {
-    openDoor = anySensorBelow;
+    openDoor = false;
+  }
+  else if (!keepOpen)
+  {
+    openDoor = anySensorQualified;
+  }
+
+  if (Config::enableSensorDebugDisplay && display)
+  {
+    auto formatDistance = [](uint16_t mm, char *out, size_t len) {
+      if (mm == 0 || mm == Config::TOFSensorErrorValue)
+      {
+        if (len > 0)
+        {
+          strncpy(out, "--", len - 1);
+          out[len - 1] = '\0';
+        }
+        return;
+      }
+      float cm = mm / 10.0f;
+      char buf[16];
+      dtostrf(cm, 0, 1, buf);
+      const char *trimmed = buf;
+      while (*trimmed == ' ')
+      {
+        ++trimmed;
+      }
+      if (len > 0)
+      {
+        strncpy(out, trimmed, len - 1);
+        out[len - 1] = '\0';
+      }
+    };
+
+    char indoor[12];
+    char outdoor[12];
+    formatDistance(range[static_cast<size_t>(IndoorSensor)], indoor, sizeof(indoor));
+    formatDistance(range[static_cast<size_t>(OutdoorSensor)], outdoor, sizeof(outdoor));
+
+    char message[64];
+    snprintf(message, sizeof(message), "IN:%scm OUT:%scm", indoor, outdoor);
+    DisplayHelpers::showStatus(display, message, false, 1);
   }
 }
 
@@ -391,6 +507,20 @@ void DoorController::checkOverrideSwitches()
   {
     openDoor = false;
     keepClosed = true;
+    if (state == DoorState::Open || state == DoorState::Opening)
+    {
+      if (stepper)
+      {
+        state = DoorState::Closing;
+        fastClosing = true;
+        displayedSeekBottomHint = false;
+        stepper->moveTo(Config::expectedDoorClosePosition, false);
+      }
+      else
+      {
+        state = DoorState::Closing;
+      }
+    }
     showStateOnDisplay();
     SERIAL_PRINT("Override keep closed switch activated. Door will remain closed.\n");
   }

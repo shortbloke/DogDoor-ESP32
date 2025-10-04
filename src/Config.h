@@ -24,6 +24,9 @@ namespace Config
   constexpr uint8_t TOFSensorStartAddress = 0x2A;
   constexpr std::array<const char *, numTOFSensors> sensorNames = {"Indoor", "Outdoor"};
   constexpr uint16_t TOFSensorErrorValue = 65535;
+  constexpr uint16_t TOFSensorMaxConsideredDistanceMm = 1000; // Ignore readings beyond 100 cm
+  constexpr uint8_t TOFSensorTriggerConsecutiveReadings = 4; // Number of consecutive readings below threshold to trigger action
+  constexpr bool enableSensorDebugDisplay = false;
 
   // --- Stepper Motor ---
   constexpr uint8_t dirPinStepper = 41;

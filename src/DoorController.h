@@ -49,6 +49,7 @@ private:
   // Periodic VL53L0X re-initialization timing
   unsigned long lastSensorInitMs = 0;
   static constexpr unsigned long sensorReinitIntervalMs = 5UL * 60UL * 1000UL; // 5 minutes
+  static constexpr unsigned long sensorStatusGracePeriodMs = 250; // allow sensor to settle after init
   // --- State for display icons ---
   bool wifiConnected = false;
   // 0 = none, 1 = indoor, 2 = outdoor
@@ -57,13 +58,15 @@ private:
   void setupStepper();
   bool setupTOFSensors();
   bool reinitTOFSensors();
+  bool initializeTOFSensors(bool isReinit);
   void setupLimitSwitches();
 
   // Sensor and state helpers
-  void updateSensorStates(bool allowDoorTrigger);
+  void updateSensorStates();
   void checkOverrideSwitches();
   void handleState();
   void showStateOnDisplay();
+  void publishSensorStatus(uint8_t sensorIndex, bool ok, bool reportInitEvent = false);
 
   // State machine handlers
   void handleClosedState();
@@ -82,6 +85,8 @@ private:
   std::array<bool, Config::numTOFSensors> sensorReady{{false, false}};
   std::array<bool, Config::numTOFSensors> sensorBelowThreshold{{false, false}};
   std::array<uint16_t, Config::numTOFSensors> range{{0, 0}};
+  std::array<unsigned long, Config::numTOFSensors> sensorStatusSuppressUntil{{0, 0}};
+  std::array<uint8_t, Config::numTOFSensors> sensorBelowStreak{{0, 0}};
   std::array<Bounce, Config::numLimitSwitches> limitSwitchDebouncers;
 
   // --- State variables ---
