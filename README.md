@@ -81,6 +81,17 @@ pio device monitor
 An `esp32_ota` environment exists for OTA uploads; update `platformio.ini` with
 your device’s IP/OTA password before using `pio run -e esp32_ota -t upload`.
 
+### Versioning
+
+- Each build runs `scripts/generate_version_file.py`, which increments the
+  firmware patch number (starting at `1.0.0`), stamps the current UTC date, and
+  writes the values into `src/Version.h` (kept out of Git).
+- The latest version, build date, and git hash appear in the serial diagnostics
+  output and the MQTT device metadata (`sw_version`) so Home Assistant and other
+  clients see the same information.
+- The counter lives in `.pio/version_state.json`; delete that file if you ever
+  want to reset the local version sequence.
+
 ### MQTT & Home Assistant
 
 - The firmware publishes retained topics under the `dogdoor/` namespace (door
