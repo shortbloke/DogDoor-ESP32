@@ -3,6 +3,7 @@
 #include "DoorController.h"
 #include "TofSensorManager.h"
 #include "ConnectivityManager.h"
+#include "Version.h"
 
 void DiagnosticsService::begin(DoorController *doorController,
                                TofSensorManager *tofManager,
@@ -73,6 +74,16 @@ void DiagnosticsService::printStatus() const
 {
   Serial.println();
   Serial.println(F("=== Dog Door Diagnostics ==="));
+
+  Serial.print(F("Firmware version: "));
+  Serial.println(AppVersion::kVersionWithDate);
+  Serial.print(F("Git hash: "));
+  Serial.print(AppVersion::kGitHash);
+  if (AppVersion::kDirty)
+  {
+    Serial.print(F(" (dirty)"));
+  }
+  Serial.println();
 
   const char *state = door->getStateString();
   Serial.print(F("Door state: "));

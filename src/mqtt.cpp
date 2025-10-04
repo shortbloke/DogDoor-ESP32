@@ -10,6 +10,7 @@
 #include <pgmspace.h>
 #include "Secrets.h"
 #include "DisplayHelpers.h"
+#include "Version.h"
 
 // Serial debug print macro matches DoorController.cpp usage.
 #ifdef SERIAL_PRINT_ENABLE
@@ -71,12 +72,18 @@ static bool tofTopicsInitialized = false;
 // Longest discovery payload is just over 450 bytes once the shared device
 // metadata is injected, so give ourselves plenty of headroom.
 static constexpr size_t kDiscoveryPayloadBufferSize = 512;
-static const char kDeviceObjectJson[] PROGMEM =
+static const char kDeviceObjectTemplate[] PROGMEM =
   "{\"identifiers\":[\"dogdoor_esp32\"],"
   "\"name\":\"Dog Door\","
   "\"manufacturer\":\"Martin Rowan\","
   "\"model\":\"ESP32\","
-  "\"sw_version\":\"1.0.0\"}";
+  "\"sw_version\":\"%s\"}";
+static constexpr size_t kDeviceObjectBufferSize = 192;
+static constexpr size_t kDeviceVersionBufferSize = 96;
+static char deviceObjectJson[kDeviceObjectBufferSize];
+static bool deviceObjectJsonInitialised = false;
+static char deviceVersionBuffer[kDeviceVersionBufferSize];
+static bool deviceVersionInitialised = false;
 
 static const char kDoorTemplate[] PROGMEM =
   "{\"name\":\"Dog Door\",\"unique_id\":\"dogdoor_door\",\"device_class\":\"door\","
@@ -130,8 +137,40 @@ static DiscoveryPayloadCache discoveryPayloads;
 static DiscoveryPayloadCache publishedPayloads;
 static bool publishedPayloadsValid = false;
 
+static const char *deviceVersionString() {
+  if (!deviceVersionInitialised) {
+    String version(AppVersion::kVersionWithDate);
+    if (AppVersion::kDirty) {
+      version += F(" dirty");
+    }
+    if (version.length() >= kDeviceVersionBufferSize) {
+      SERIAL_PRINT("[MQTT] Version string truncated for device info\n");
+      version = version.substring(0, kDeviceVersionBufferSize - 1);
+    }
+    version.toCharArray(deviceVersionBuffer, kDeviceVersionBufferSize);
+    deviceVersionInitialised = true;
+  }
+  return deviceVersionBuffer;
+}
+
+static const char *deviceObjectJsonString() {
+  if (!deviceObjectJsonInitialised) {
+    const int written = snprintf_P(
+      deviceObjectJson,
+      sizeof(deviceObjectJson),
+      kDeviceObjectTemplate,
+      deviceVersionString());
+    if (written < 0 || static_cast<size_t>(written) >= sizeof(deviceObjectJson)) {
+      SERIAL_PRINT("[MQTT] Device object JSON truncated\n");
+      deviceObjectJson[sizeof(deviceObjectJson) - 1] = '\0';
+    }
+    deviceObjectJsonInitialised = true;
+  }
+  return deviceObjectJson;
+}
+
 static void ensureTofTopicsInitialized();
- 
+
 static void formatDiscoveryJson(char* buffer, size_t len, PGM_P fmt, ...) {
   if (!buffer || len == 0) {
     return;
@@ -152,13 +191,15 @@ static void ensureDiscoveryPayloads() {
     return;
   }
 
+  const char *deviceJson = deviceObjectJsonString();
+
   formatDiscoveryJson(
     discoveryPayloads.door,
     sizeof(discoveryPayloads.door),
     kDoorTemplate,
     kTopicDoorState,
     kTopicAvailability,
-    kDeviceObjectJson);
+    deviceJson);
 
   formatDiscoveryJson(
     discoveryPayloads.doorState,
@@ -166,7 +207,7 @@ static void ensureDiscoveryPayloads() {
     kDoorStateTemplate,
     kTopicDoorStateActual,
     kTopicAvailability,
-    kDeviceObjectJson);
+    deviceJson);
 
   formatDiscoveryJson(
     discoveryPayloads.distanceIndoor,
@@ -176,7 +217,7 @@ static void ensureDiscoveryPayloads() {
     "indoor",
     kTopicDistanceIndoor,
     kTopicAvailability,
-    kDeviceObjectJson);
+    deviceJson);
 
   formatDiscoveryJson(
     discoveryPayloads.distanceOutdoor,
@@ -186,7 +227,7 @@ static void ensureDiscoveryPayloads() {
     "outdoor",
     kTopicDistanceOutdoor,
     kTopicAvailability,
-    kDeviceObjectJson);
+    deviceJson);
 
   formatDiscoveryJson(
     discoveryPayloads.limitBottom,
@@ -196,7 +237,7 @@ static void ensureDiscoveryPayloads() {
     "bottom",
     kTopicLimitBottom,
     kTopicAvailability,
-    kDeviceObjectJson);
+    deviceJson);
 
   formatDiscoveryJson(
     discoveryPayloads.limitTop,
@@ -206,7 +247,7 @@ static void ensureDiscoveryPayloads() {
     "top",
     kTopicLimitTop,
     kTopicAvailability,
-    kDeviceObjectJson);
+    deviceJson);
 
   formatDiscoveryJson(
     discoveryPayloads.sensorTrigger,
@@ -214,7 +255,7 @@ static void ensureDiscoveryPayloads() {
     kSensorTriggerTemplate,
     kTopicSensorTrigger,
     kTopicAvailability,
-    kDeviceObjectJson);
+    deviceJson);
 
   for (size_t i = 0; i < Config.tof.count; ++i) {
     const char* friendly = tofStatusFriendlyNames[i].c_str();
@@ -228,7 +269,7 @@ static void ensureDiscoveryPayloads() {
       kTofStatusPayloadError,
       kTofStatusPayloadOk,
       kTopicAvailability,
-      kDeviceObjectJson);
+      deviceJson);
 
     formatDiscoveryJson(
       discoveryPayloads.tofInit[i].data(),
@@ -238,7 +279,7 @@ static void ensureDiscoveryPayloads() {
       tofInitUniqueIds[i].c_str(),
       tofInitTopics[i].c_str(),
       kTopicAvailability,
-      kDeviceObjectJson);
+      deviceJson);
   }
 
   discoveryPayloads.initialised = true;
