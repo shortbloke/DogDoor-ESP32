@@ -25,9 +25,11 @@ void ConnectivityManager::loop()
     return;
   }
 
+  wl_status_t status = WiFi.status();
+
   if (wifiConnected)
   {
-    if (WiFi.status() != WL_CONNECTED)
+    if (status != WL_CONNECTED)
     {
       handleDisconnected();
     }
@@ -35,10 +37,26 @@ void ConnectivityManager::loop()
   }
 
   // Not connected yet, check for success or retry window expiry.
-  if (WiFi.status() == WL_CONNECTED)
+  if (status == WL_CONNECTED)
   {
     handleConnected();
     return;
+  }
+
+  switch (status)
+  {
+    case WL_NO_SSID_AVAIL:
+    case WL_CONNECT_FAILED:
+#ifdef WL_WRONG_PASSWORD
+    case WL_WRONG_PASSWORD:
+#endif
+#ifdef WL_CONNECTION_LOST
+    case WL_CONNECTION_LOST:
+#endif
+      handleConnectionFailure(status);
+      return;
+    default:
+      break;
   }
 
   unsigned long now = millis();
@@ -107,6 +125,19 @@ void ConnectivityManager::handleDisconnected()
   scheduleRetry();
 }
 
+void ConnectivityManager::handleConnectionFailure(wl_status_t status)
+{
+  wifiConnected = false;
+  const char *reason = statusDescription(status);
+  showStatus(reason, true);
+  Serial.printf("WARN: WiFi connection failure: %s (code=%d)\n", reason, static_cast<int>(status));
+  if (door)
+  {
+    door->setWiFiConnected(false);
+  }
+  scheduleRetry();
+}
+
 void ConnectivityManager::scheduleRetry()
 {
   WiFi.disconnect();
@@ -117,4 +148,38 @@ void ConnectivityManager::scheduleRetry()
 void ConnectivityManager::showStatus(const char *message, bool warning, int textSize)
 {
   DisplayHelpers::showStatus(display, message, warning, textSize);
+}
+
+const char *ConnectivityManager::statusDescription(wl_status_t status)
+{
+  switch (status)
+  {
+    case WL_IDLE_STATUS:
+      return "WiFi idle";
+    case WL_NO_SSID_AVAIL:
+      return "WiFi SSID not found";
+    case WL_SCAN_COMPLETED:
+      return "WiFi scan complete";
+    case WL_CONNECTED:
+      return "WiFi connected";
+    case WL_CONNECT_FAILED:
+      return "WiFi auth failed";
+#ifdef WL_WRONG_PASSWORD
+    case WL_WRONG_PASSWORD:
+      return "WiFi wrong password";
+#endif
+#ifdef WL_CONNECTION_LOST
+    case WL_CONNECTION_LOST:
+      return "WiFi connection lost";
+#endif
+    case WL_DISCONNECTED:
+      return "WiFi disconnected";
+#ifdef WL_NO_SHIELD
+    case WL_NO_SHIELD:
+      return "WiFi shield missing";
+#endif
+    default:
+      break;
+  }
+  return "WiFi error";
 }

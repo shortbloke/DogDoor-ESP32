@@ -21,8 +21,10 @@ private:
   void startConnectCycle();
   void handleConnected();
   void handleDisconnected();
+  void handleConnectionFailure(wl_status_t status);
   void scheduleRetry();
   void showStatus(const char *message, bool warning = false, int textSize = 1);
+  static const char *statusDescription(wl_status_t status);
 
   DoorController *door = nullptr;
   Adafruit_SSD1306 *display = nullptr;

@@ -44,6 +44,8 @@ namespace Config
   constexpr int LimitSwitchDebounceMs = 2;
   constexpr int SensorInitDelayMs = 10;
   constexpr int SetupDelayMs = 2000;
+  constexpr unsigned long SensorReinitIntervalMs = 5UL * 60UL * 1000UL; // 5 minutes
+  constexpr unsigned long SensorStatusGracePeriodMs = 250; // allow sensor to settle after init
 
   // --- Door Control ---
   static constexpr unsigned long doorOpenHoldMs = 5000; // 5 seconds

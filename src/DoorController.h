@@ -1,14 +1,15 @@
 #pragma once
 #include <Bounce2.h>
 #include <FastAccelStepper.h>
-#include <VL53L0X.h>
-#include <Adafruit_SSD1306.h>
 #include <array>
 #include <cstdint>
 #include "Config.h"
+#include "DoorStateMachine.h"
+#include "TofSensorManager.h"
 
 // Forward declaration for UMS3
 class UMS3;
+class DisplayService;
 
 // Controls the automated dog door hardware and logic.
 class DoorController
@@ -24,8 +25,8 @@ public:
   void loop();
 
   void setUMS3(UMS3 *ums3Ptr);
-
-  void setDisplay(Adafruit_SSD1306 *displayPtr);
+  void setDisplayService(DisplayService *service);
+  void setTofSensorManager(TofSensorManager *manager);
 
   const char *getStateString() const;
   float getDistanceIndoorCm() const;
@@ -37,36 +38,31 @@ public:
   bool isLimitSwitchPressed(LimitSwitch sw);
   bool isLimitSwitchPressedRaw(LimitSwitch sw) const;
 
-  uint8_t getLastSensorTriggered() const { return lastSensorTriggered; }
+  uint8_t getLastSensorTriggered() const;
 
   // Update WiFi connection status for display
   void setWiFiConnected(bool connected);
+
+  void handleTofSensorStatus(uint8_t sensorIndex, bool ok, bool reportInitEvent);
 
 private:
   // WiFi status check timing
   unsigned long lastWiFiCheckMs = 0;
   static constexpr unsigned long wifiCheckIntervalMs = 30000; // 30 seconds
-  // Periodic VL53L0X re-initialization timing
-  unsigned long lastSensorInitMs = 0;
-  static constexpr unsigned long sensorReinitIntervalMs = 5UL * 60UL * 1000UL; // 5 minutes
-  static constexpr unsigned long sensorStatusGracePeriodMs = 250; // allow sensor to settle after init
+
   // --- State for display icons ---
   bool wifiConnected = false;
-  // 0 = none, 1 = indoor, 2 = outdoor
-  uint8_t lastSensorTriggered = 0;
+
   // Hardware setup helpers
   void setupStepper();
-  bool setupTOFSensors();
-  bool reinitTOFSensors();
-  bool initializeTOFSensors(bool isReinit);
   void setupLimitSwitches();
 
   // Sensor and state helpers
-  void updateSensorStates();
+  void processSensorUpdate(const TofSensorManager::UpdateResult &update);
   void checkOverrideSwitches();
   void handleState();
   void showStateOnDisplay();
-  void publishSensorStatus(uint8_t sensorIndex, bool ok, bool reportInitEvent = false);
+  void handleStateTransition(DoorState from, DoorState to, const char *reason);
 
   // State machine handlers
   void handleClosedState();
@@ -81,12 +77,6 @@ private:
   FastAccelStepper *stepper = nullptr;
 
   // --- Sensors and switches ---
-  std::array<VL53L0X, Config::numTOFSensors> sensors;
-  std::array<bool, Config::numTOFSensors> sensorReady{{false, false}};
-  std::array<bool, Config::numTOFSensors> sensorBelowThreshold{{false, false}};
-  std::array<uint16_t, Config::numTOFSensors> range{{0, 0}};
-  std::array<unsigned long, Config::numTOFSensors> sensorStatusSuppressUntil{{0, 0}};
-  std::array<uint8_t, Config::numTOFSensors> sensorBelowStreak{{0, 0}};
   std::array<Bounce, Config::numLimitSwitches> limitSwitchDebouncers;
 
   // --- State variables ---
@@ -96,14 +86,13 @@ private:
   bool fastClosing = false;
   bool displayedSeekTopHint = false;
   bool displayedSeekBottomHint = false;
-  DoorState state = DoorState::Closed;
-  DoorState previousState = DoorState::Closed;
+  DoorStateMachine stateMachine;
   int32_t expectedDoorOpenPosition = 100000; // Updated at runtime based on limit switches
   UMS3 *ums3 = nullptr;
-  Adafruit_SSD1306 *display = nullptr;
+  DisplayService *displayService = nullptr;
+  TofSensorManager *tofSensors = nullptr;
   unsigned long openStateEnteredMs = 0;
   bool openStateFirstEntry = true;
-  bool sensorInitNeeded = false;
   std::array<int8_t, Config::numLimitSwitches> lastLimitSwitchState{{-1, -1}};
 
   void setPixelColor(uint8_t r, uint8_t g, uint8_t b);

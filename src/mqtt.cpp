@@ -3,7 +3,9 @@
 #include <PubSubClient.h>
 #include <array>
 #include <cstdint>
+#include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 #include "Secrets.h"
 #include "DisplayHelpers.h"
@@ -65,10 +67,139 @@ static std::array<uint32_t, Config::numTOFSensors> tofInitCounters;
 static std::array<uint32_t, Config::numTOFSensors> tofInitPublished;
 static bool tofTopicsInitialized = false;
 
+static constexpr size_t kDiscoveryPayloadBufferSize = 320;
+static constexpr char kDeviceObjectJson[] =
+  "{\"identifiers\":[\"dogdoor_esp32\"],"
+  "\"name\":\"Dog Door\","
+  "\"manufacturer\":\"Martin Rowan\","
+  "\"model\":\"ESP32\","
+  "\"sw_version\":\"1.0.0\"}";
+
+struct DiscoveryPayloadCache {
+  bool initialised = false;
+  char door[kDiscoveryPayloadBufferSize];
+  char doorState[kDiscoveryPayloadBufferSize];
+  char distanceIndoor[kDiscoveryPayloadBufferSize];
+  char distanceOutdoor[kDiscoveryPayloadBufferSize];
+  char limitBottom[kDiscoveryPayloadBufferSize];
+  char limitTop[kDiscoveryPayloadBufferSize];
+  char sensorTrigger[kDiscoveryPayloadBufferSize];
+  std::array<std::array<char, kDiscoveryPayloadBufferSize>, Config::numTOFSensors> tofStatus{};
+  std::array<std::array<char, kDiscoveryPayloadBufferSize>, Config::numTOFSensors> tofInit{};
+};
+
+static DiscoveryPayloadCache discoveryPayloads;
+
+static void ensureTofTopicsInitialized();
+
+static void formatDiscoveryJson(char* buffer, size_t len, const char* fmt, ...) {
+  if (!buffer || len == 0) {
+    return;
+  }
+  va_list args;
+  va_start(args, fmt);
+  int written = vsnprintf(buffer, len, fmt, args);
+  va_end(args);
+  if (written < 0 || static_cast<size_t>(written) >= len) {
+    SERIAL_PRINT("[MQTT] Discovery payload truncated\n");
+    buffer[len - 1] = '\0';
+  }
+}
+
+static void ensureDiscoveryPayloads() {
+  ensureTofTopicsInitialized();
+  if (discoveryPayloads.initialised) {
+    return;
+  }
+
+  formatDiscoveryJson(
+    discoveryPayloads.door,
+    sizeof(discoveryPayloads.door),
+    "{\"name\":\"Dog Door\",\"unique_id\":\"dogdoor_door\",\"device_class\":\"door\",\"state_topic\":\"%s\",\"payload_on\":\"OPEN\",\"payload_off\":\"CLOSED\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+    kTopicDoorState,
+    kTopicAvailability,
+    kDeviceObjectJson);
+
+  formatDiscoveryJson(
+    discoveryPayloads.doorState,
+    sizeof(discoveryPayloads.doorState),
+    "{\"name\":\"Dog Door State\",\"unique_id\":\"dogdoor_state\",\"state_topic\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"icon\":\"mdi:door\",\"device\":%s}",
+    kTopicDoorStateActual,
+    kTopicAvailability,
+    kDeviceObjectJson);
+
+  formatDiscoveryJson(
+    discoveryPayloads.distanceIndoor,
+    sizeof(discoveryPayloads.distanceIndoor),
+    "{\"name\":\"Dog Door Distance Indoor\",\"unique_id\":\"dogdoor_distance_indoor\",\"device_class\":\"distance\",\"state_class\":\"measurement\",\"unit_of_measurement\":\"cm\",\"state_topic\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+    kTopicDistanceIndoor,
+    kTopicAvailability,
+    kDeviceObjectJson);
+
+  formatDiscoveryJson(
+    discoveryPayloads.distanceOutdoor,
+    sizeof(discoveryPayloads.distanceOutdoor),
+    "{\"name\":\"Dog Door Distance Outdoor\",\"unique_id\":\"dogdoor_distance_outdoor\",\"device_class\":\"distance\",\"state_class\":\"measurement\",\"unit_of_measurement\":\"cm\",\"state_topic\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+    kTopicDistanceOutdoor,
+    kTopicAvailability,
+    kDeviceObjectJson);
+
+  formatDiscoveryJson(
+    discoveryPayloads.limitBottom,
+    sizeof(discoveryPayloads.limitBottom),
+    "{\"name\":\"Dog Door Limit Bottom\",\"unique_id\":\"dogdoor_limit_bottom\",\"device_class\":\"door\",\"state_topic\":\"%s\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+    kTopicLimitBottom,
+    kTopicAvailability,
+    kDeviceObjectJson);
+
+  formatDiscoveryJson(
+    discoveryPayloads.limitTop,
+    sizeof(discoveryPayloads.limitTop),
+    "{\"name\":\"Dog Door Limit Top\",\"unique_id\":\"dogdoor_limit_top\",\"device_class\":\"door\",\"state_topic\":\"%s\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+    kTopicLimitTop,
+    kTopicAvailability,
+    kDeviceObjectJson);
+
+  formatDiscoveryJson(
+    discoveryPayloads.sensorTrigger,
+    sizeof(discoveryPayloads.sensorTrigger),
+    "{\"name\":\"Dog Door Sensor Trigger\",\"unique_id\":\"dogdoor_sensor_trigger\",\"state_topic\":\"%s\",\"json_attributes_topic\":\"dogdoor/sensor_trigger_distance\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"icon\":\"mdi:arrow-decision\",\"device\":%s}",
+    kTopicSensorTrigger,
+    kTopicAvailability,
+    kDeviceObjectJson);
+
+  for (size_t i = 0; i < Config::numTOFSensors; ++i) {
+    const char* friendly = tofStatusFriendlyNames[i].c_str();
+    formatDiscoveryJson(
+      discoveryPayloads.tofStatus[i].data(),
+      discoveryPayloads.tofStatus[i].size(),
+      "{\"name\":\"Dog Door %s TOF Status\",\"unique_id\":\"%s\",\"device_class\":\"problem\",\"state_topic\":\"%s\",\"payload_on\":\"%s\",\"payload_off\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}",
+      friendly,
+      tofStatusUniqueIds[i].c_str(),
+      tofStatusTopics[i].c_str(),
+      kTofStatusPayloadError,
+      kTofStatusPayloadOk,
+      kTopicAvailability,
+      kDeviceObjectJson);
+
+    formatDiscoveryJson(
+      discoveryPayloads.tofInit[i].data(),
+      discoveryPayloads.tofInit[i].size(),
+      "{\"name\":\"Dog Door %s TOF Init Count\",\"unique_id\":\"%s\",\"state_topic\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"unit_of_measurement\":\"count\",\"icon\":\"mdi:counter\",\"device\":%s}",
+      friendly,
+      tofInitUniqueIds[i].c_str(),
+      tofInitTopics[i].c_str(),
+      kTopicAvailability,
+      kDeviceObjectJson);
+  }
+
+  discoveryPayloads.initialised = true;
+}
+
 // ---------- Helpers ----------
-static bool publishRetained(const char* topic, const String& payload) {
-  if (!mqttClient.publish(topic, payload.c_str(), true)) {
-    SERIAL_PRINT("[MQTT] Publish failed (%s) len=%u\n", topic, payload.length());
+static bool publishRetained(const char* topic, const char* payload) {
+  if (!mqttClient.publish(topic, payload, true)) {
+    SERIAL_PRINT("[MQTT] Publish failed (%s) len=%u\n", topic, static_cast<unsigned>(std::strlen(payload)));
     return false;
   }
   return true;
@@ -240,157 +371,20 @@ void mqttPublishTOFInit(uint8_t sensorIndex) {
 static void publishDiscovery() {
   if (!mqttClient.connected()) return;
 
-  ensureTofTopicsInitialized();
-
-  String deviceObj =
-    "{\"identifiers\":[\"dogdoor_esp32\"],"
-    "\"name\":\"Dog Door\","
-    "\"manufacturer\":\"Martin Rowan\","
-    "\"model\":\"ESP32\","
-    "\"sw_version\":\"1.0.0\"}";
-
-  // Binary sensor (door)
-  String doorPayload =
-    String("{"
-      "\"name\":\"Dog Door\","
-      "\"unique_id\":\"dogdoor_door\","
-      "\"device_class\":\"door\","
-      "\"state_topic\":\"") + kTopicDoorState + "\","
-      "\"payload_on\":\"OPEN\","
-      "\"payload_off\":\"CLOSED\","
-      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
-      "\"payload_available\":\"online\","
-      "\"payload_not_available\":\"offline\","
-      "\"device\":" + deviceObj +
-    "}";
-
-  // Door state text sensor
-  String doorStatePayload =
-    String("{"
-      "\"name\":\"Dog Door State\","
-      "\"unique_id\":\"dogdoor_state\","
-      "\"state_topic\":\"") + kTopicDoorStateActual + "\","
-      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
-      "\"payload_available\":\"online\","
-      "\"payload_not_available\":\"offline\","
-      "\"icon\":\"mdi:door\","
-      "\"device\":" + deviceObj +
-    "}";
-
-  // Indoor distance sensor
-  String distInPayload =
-    String("{"
-      "\"name\":\"Dog Door Distance Indoor\","
-      "\"unique_id\":\"dogdoor_distance_indoor\","
-      "\"device_class\":\"distance\","
-      "\"state_class\":\"measurement\","
-      "\"unit_of_measurement\":\"cm\","
-      "\"state_topic\":\"") + kTopicDistanceIndoor + "\","
-      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
-      "\"payload_available\":\"online\","
-      "\"payload_not_available\":\"offline\","
-      "\"device\":" + deviceObj +
-    "}";
-
-  // Outdoor distance sensor
-  String distOutPayload =
-    String("{"
-      "\"name\":\"Dog Door Distance Outdoor\","
-      "\"unique_id\":\"dogdoor_distance_outdoor\","
-      "\"device_class\":\"distance\","
-      "\"state_class\":\"measurement\","
-      "\"unit_of_measurement\":\"cm\","
-      "\"state_topic\":\"") + kTopicDistanceOutdoor + "\","
-      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
-      "\"payload_available\":\"online\","
-      "\"payload_not_available\":\"offline\","
-      "\"device\":" + deviceObj +
-    "}";
-
-  // Bottom limit switch sensor
-  String limitBottomPayload =
-    String("{"
-      "\"name\":\"Dog Door Limit Bottom\","
-      "\"unique_id\":\"dogdoor_limit_bottom\","
-      "\"device_class\":\"door\","
-      "\"state_topic\":\"") + kTopicLimitBottom + "\","
-      "\"payload_on\":\"ON\","
-      "\"payload_off\":\"OFF\","
-      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
-      "\"payload_available\":\"online\","
-      "\"payload_not_available\":\"offline\","
-      "\"device\":" + deviceObj +
-    "}";
-
-  // Top limit switch sensor
-  String limitTopPayload =
-    String("{"
-      "\"name\":\"Dog Door Limit Top\","
-      "\"unique_id\":\"dogdoor_limit_top\","
-      "\"device_class\":\"door\","
-      "\"state_topic\":\"") + kTopicLimitTop + "\","
-      "\"payload_on\":\"ON\","
-      "\"payload_off\":\"OFF\","
-      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
-      "\"payload_available\":\"online\","
-      "\"payload_not_available\":\"offline\","
-      "\"device\":" + deviceObj +
-    "}";
-
-  // Sensor trigger text sensor
-  String sensorTriggerPayload =
-    String("{"
-      "\"name\":\"Dog Door Sensor Trigger\","
-      "\"unique_id\":\"dogdoor_sensor_trigger\","
-      "\"state_topic\":\"") + kTopicSensorTrigger + "\","
-      "\"json_attributes_topic\":\"dogdoor/sensor_trigger_distance\","
-      "\"availability_topic\":\"" + String(kTopicAvailability) + "\","
-      "\"payload_available\":\"online\","
-      "\"payload_not_available\":\"offline\","
-      "\"icon\":\"mdi:arrow-decision\","
-      "\"device\":" + deviceObj +
-    "}";
-
+  ensureDiscoveryPayloads();
 
   bool ok = true;
-  ok &= publishRetained(kDiscoveryDoorConfig, doorPayload);
-  ok &= publishRetained(kDiscoveryDoorStateConfig, doorStatePayload);
-  ok &= publishRetained(kDiscoveryDistanceIndoorConfig, distInPayload);
-  ok &= publishRetained(kDiscoveryDistanceOutdoorConfig, distOutPayload);
-  ok &= publishRetained(kDiscoveryLimitBottomConfig, limitBottomPayload);
-  ok &= publishRetained(kDiscoveryLimitTopConfig, limitTopPayload);
-  ok &= publishRetained(kDiscoverySensorTriggerConfig, sensorTriggerPayload);
+  ok &= publishRetained(kDiscoveryDoorConfig, discoveryPayloads.door);
+  ok &= publishRetained(kDiscoveryDoorStateConfig, discoveryPayloads.doorState);
+  ok &= publishRetained(kDiscoveryDistanceIndoorConfig, discoveryPayloads.distanceIndoor);
+  ok &= publishRetained(kDiscoveryDistanceOutdoorConfig, discoveryPayloads.distanceOutdoor);
+  ok &= publishRetained(kDiscoveryLimitBottomConfig, discoveryPayloads.limitBottom);
+  ok &= publishRetained(kDiscoveryLimitTopConfig, discoveryPayloads.limitTop);
+  ok &= publishRetained(kDiscoverySensorTriggerConfig, discoveryPayloads.sensorTrigger);
 
   for (size_t i = 0; i < Config::numTOFSensors; ++i) {
-    String sensorName = String("Dog Door ") + tofStatusFriendlyNames[i] + " TOF Status";
-    String payload =
-      String("{") +
-        "\"name\":\"" + sensorName + "\"," +
-        "\"unique_id\":\"" + tofStatusUniqueIds[i] + "\"," +
-        "\"device_class\":\"problem\"," +
-        "\"state_topic\":\"" + tofStatusTopics[i] + "\"," +
-        "\"payload_on\":\"" + kTofStatusPayloadError + "\"," +
-        "\"payload_off\":\"" + kTofStatusPayloadOk + "\"," +
-        "\"availability_topic\":\"" + String(kTopicAvailability) + "\"," +
-        "\"payload_available\":\"online\"," +
-        "\"payload_not_available\":\"offline\"," +
-        "\"device\":" + deviceObj +
-      "}";
-    ok &= publishRetained(tofStatusDiscoveryTopics[i].c_str(), payload);
-
-    String initPayload =
-      String("{") +
-        "\"name\":\"Dog Door " + tofStatusFriendlyNames[i] + " TOF Init Count\"," +
-        "\"unique_id\":\"" + tofInitUniqueIds[i] + "\"," +
-        "\"state_topic\":\"" + tofInitTopics[i] + "\"," +
-        "\"availability_topic\":\"" + String(kTopicAvailability) + "\"," +
-        "\"payload_available\":\"online\"," +
-        "\"payload_not_available\":\"offline\"," +
-        "\"unit_of_measurement\":\"count\"," +
-        "\"icon\":\"mdi:counter\"," +
-        "\"device\":" + deviceObj +
-      "}";
-    ok &= publishRetained(tofInitDiscoveryTopics[i].c_str(), initPayload);
+    ok &= publishRetained(tofStatusDiscoveryTopics[i].c_str(), discoveryPayloads.tofStatus[i].data());
+    ok &= publishRetained(tofInitDiscoveryTopics[i].c_str(), discoveryPayloads.tofInit[i].data());
   }
 
   if (ok) {
@@ -451,6 +445,7 @@ static void mqttReconnect() {
 void mqttSetup(DoorTelemetryProvider *provider) {
   ensureTofTopicsInitialized();
   resetTofStatusCaches();
+  discoveryPayloads.initialised = false;
   telemetry = provider;
   discoveryPublished = false;
   lastDoorState = "";

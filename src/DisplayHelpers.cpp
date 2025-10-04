@@ -1,137 +1,73 @@
 #include "DisplayHelpers.h"
-#include <WiFi.h>
-#include <cstring>
+#include "DisplayService.h"
 
-// Static member definitions
-bool DisplayHelpers::wifiConnected = false;
-bool DisplayHelpers::mqttConnected = false;
-uint8_t DisplayHelpers::lastSensorTriggered = 0;
-Adafruit_SSD1306 *DisplayHelpers::activeDisplay = nullptr;
-bool DisplayHelpers::lastMessageValid = false;
-bool DisplayHelpers::lastMessageWasWarning = false;
-int DisplayHelpers::lastMessageTextSize = 1;
-char DisplayHelpers::lastMessage[DisplayHelpers::maxMessageLength] = {0};
+namespace {
+DisplayService *gDisplayService = nullptr;
+}
 
-void DisplayHelpers::setWiFiConnected(bool connected)
+void DisplayHelpers::setService(DisplayService *service)
 {
-    if (wifiConnected == connected)
-        return;
-    wifiConnected = connected;
-    refreshStatus();
-}
-void DisplayHelpers::setMQTTConnected(bool connected)
-{
-    if (mqttConnected == connected)
-        return;
-    mqttConnected = connected;
-    refreshStatus();
-}
-void DisplayHelpers::setLastSensorTriggered(uint8_t sensor)
-{
-    if (lastSensorTriggered == sensor)
-        return;
-    lastSensorTriggered = sensor;
-    refreshStatus();
+    gDisplayService = service;
 }
 
 void DisplayHelpers::showStatus(Adafruit_SSD1306 *display, const char *msg, bool isWarning, int textSize)
 {
-    if (!display)
-        return;
-
-    const bool displayChanged = activeDisplay != display;
-    const bool nextMessageValid = (msg != nullptr) && (msg[0] != '\0');
-    bool messageChanged = (lastMessageValid != nextMessageValid);
-    if (!messageChanged && nextMessageValid)
-    {
-        messageChanged = std::strncmp(lastMessage, msg, maxMessageLength - 1) != 0;
-    }
-    const bool warningChanged = (lastMessageWasWarning != isWarning);
-    const bool textSizeChanged = (lastMessageTextSize != textSize);
-
-    activeDisplay = display;
-    lastMessageValid = nextMessageValid;
-    if (nextMessageValid)
-    {
-        std::strncpy(lastMessage, msg, maxMessageLength - 1);
-        lastMessage[maxMessageLength - 1] = '\0';
-    }
-    else
-    {
-        lastMessage[0] = '\0';
-    }
-    lastMessageWasWarning = isWarning;
-    lastMessageTextSize = textSize;
-
-    if (!displayChanged && !messageChanged && !warningChanged && !textSizeChanged)
+    if (!gDisplayService)
     {
         return;
     }
-
-    renderStatus(display, lastMessageValid ? lastMessage : nullptr, isWarning, textSize);
+    if (display)
+    {
+        gDisplayService->attach(display);
+    }
+    gDisplayService->showStatus(msg, isWarning, textSize);
 }
 
 void DisplayHelpers::drawStatusIcons(Adafruit_SSD1306 *display)
 {
-    if (!display)
+    if (!gDisplayService)
+    {
         return;
-    display->clearDisplay();
-    int iconX = 0;
-    int iconY = 0;
-    if (wifiConnected)
-    {
-        display->drawBitmap(iconX, iconY, IconBitmaps::wifi_icon, IconBitmaps::iconWidth, IconBitmaps::iconHeight, SSD1306_WHITE);
     }
-    else
+    if (display)
     {
-        display->drawBitmap(iconX, iconY, IconBitmaps::nowifi_icon, IconBitmaps::iconWidth, IconBitmaps::iconHeight, SSD1306_WHITE);
+        gDisplayService->attach(display);
     }
-    iconX += IconBitmaps::iconWidth + 2;
-    if (mqttConnected)
-    {
-        display->drawBitmap(iconX, iconY, IconBitmaps::mqtt_icon, IconBitmaps::iconWidth, IconBitmaps::iconHeight, SSD1306_WHITE);
-    }
-    iconX += IconBitmaps::iconWidth + 2;
-    if (lastSensorTriggered == 1)
-    {
-        display->drawBitmap(iconX, iconY, IconBitmaps::in_icon, IconBitmaps::iconWidth, IconBitmaps::iconHeight, SSD1306_WHITE);
-    }
-    else if (lastSensorTriggered == 2)
-    {
-        display->drawBitmap(iconX, iconY, IconBitmaps::out_icon, IconBitmaps::iconWidth, IconBitmaps::iconHeight, SSD1306_WHITE);
-    }
-    iconX += IconBitmaps::iconWidth + 2;
-    if (wifiConnected)
-    {
-        // print the ip address
-        display->setTextSize(1);
-        display->setTextColor(SSD1306_WHITE);
-        display->setCursor(iconX, iconY);
-        display->print(WiFi.localIP());
-    }
+    gDisplayService->refresh();
 }
 
 void DisplayHelpers::refreshStatus()
 {
-    if (!activeDisplay)
+    if (!gDisplayService)
+    {
         return;
-    renderStatus(activeDisplay, lastMessageValid ? lastMessage : nullptr, lastMessageWasWarning, lastMessageTextSize);
+    }
+    gDisplayService->refresh();
 }
 
-void DisplayHelpers::renderStatus(Adafruit_SSD1306 *display, const char *msg, bool isWarning, int textSize)
+void DisplayHelpers::setWiFiConnected(bool connected)
 {
-    drawStatusIcons(display);
-    display->setTextSize(textSize);
-    display->setTextColor(SSD1306_WHITE);
-    display->setCursor(0, 12);
-    if (isWarning)
+    if (!gDisplayService)
     {
-        display->drawBitmap(0, 12, IconBitmaps::large_warning_icon, 16, 16, SSD1306_WHITE);
-        display->setCursor(18, 12);
+        return;
     }
-    if (msg && msg[0] != '\0')
+    gDisplayService->setWiFiConnected(connected);
+}
+
+void DisplayHelpers::setMQTTConnected(bool connected)
+{
+    if (!gDisplayService)
     {
-        display->print(msg);
+        return;
     }
-    display->display();
+    gDisplayService->setMQTTConnected(connected);
+}
+
+void DisplayHelpers::setLastSensorTriggered(uint8_t sensorId)
+{
+    if (!gDisplayService)
+    {
+        return;
+    }
+    gDisplayService->setLastSensorTriggered(sensorId);
 }
