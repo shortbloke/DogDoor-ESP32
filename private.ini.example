@@ -1,0 +1,9 @@
+; Copy this file to private.ini (which is gitignored) and fill in your secrets.
+
+[env:esp32_ota]
+; OTA authentication is kept out of version control.
+upload_flags =
+    --auth=REPLACE_WITH_DEVICE_PASSWORD
+
+; OTA host IP address
+upload_port = REPLACE_WITH_DEVICE_IP_ADDRESS

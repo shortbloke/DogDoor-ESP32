@@ -7,3 +7,4 @@
 .vscode/extensions.json
 .DS_Store
 Secrets.h
+private.ini
