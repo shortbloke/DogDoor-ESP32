@@ -24,7 +24,7 @@ This is based on my earlier [Particle Photon DogDoor](https://github.com/shortbl
 
 ## Repository Layout
 
-```
+```text
 ├── src/
 │   ├── AppContainer.cpp/h        # AppContainer ownership graph and lifecycle hooks
 │   ├── Config.cpp/h              # ConfigData defaults, persistent structs, pin maps
@@ -94,7 +94,7 @@ Refer to `src/mqtt.cpp` if you want to adjust topics or payload structure.
 
 Connect to the USB serial console at `115200` baud and type:
 
-```
+```text
 diag    # or d / status
 help    # list commands
 ```
