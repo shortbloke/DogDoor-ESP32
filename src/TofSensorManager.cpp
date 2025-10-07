@@ -162,10 +162,6 @@ TofSensorManager::UpdateResult TofSensorManager::update()
   if (result.triggerEvent)
   {
     lastSensorTriggered = result.triggerSensorId;
-    if (display)
-    {
-      display->setLastSensorTriggered(lastSensorTriggered);
-    }
   }
 
   if (sensorInitNeeded && millis() >= nextReinitAttemptMs)

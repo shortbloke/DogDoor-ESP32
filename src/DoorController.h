@@ -61,6 +61,8 @@ private:
   void handleState();
   void showStateOnDisplay();
   void handleStateTransition(DoorState from, DoorState to, const char *reason);
+  void publishDistanceForSensor(uint8_t triggerId);
+  void recordClosedOrClosingTrigger(uint8_t triggerId);
 
   // State machine handlers
   void handleClosedState();
@@ -92,6 +94,7 @@ private:
   unsigned long openStateEnteredMs = 0;
   bool openStateFirstEntry = true;
   std::array<int8_t, LimitSwitchConfig::count> lastLimitSwitchState{{-1, -1}};
+  uint8_t lastSensorTriggeredClosedOrClosing = 0;
 
   void setPixelColor(uint8_t r, uint8_t g, uint8_t b);
 };

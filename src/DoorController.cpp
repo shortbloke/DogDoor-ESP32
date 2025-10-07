@@ -28,6 +28,10 @@ void DoorController::setUMS3(UMS3 *ums3Ptr)
 void DoorController::setDisplayService(DisplayService *service)
 {
   displayService = service;
+  if (displayService)
+  {
+    displayService->setLastSensorTriggered(lastSensorTriggeredClosedOrClosing);
+  }
 }
 
 void DoorController::setTofSensorManager(TofSensorManager *manager)
@@ -191,7 +195,7 @@ DoorState DoorController::getCurrentState() const
 
 uint8_t DoorController::getLastSensorTriggered() const
 {
-  return tofSensors ? tofSensors->lastTriggerId() : 0;
+  return lastSensorTriggeredClosedOrClosing;
 }
 
 void DoorController::refreshStateDisplay()
@@ -246,18 +250,18 @@ void DoorController::processSensorUpdate(const TofSensorManager::UpdateResult &u
     return;
   }
 
+  DoorState currentState = stateMachine.current();
+  bool doorClosedOrClosing = (currentState == DoorState::Closed || currentState == DoorState::Closing);
+
   if (update.triggerEvent)
   {
     uint8_t triggerId = update.triggerSensorId;
-    if (triggerId == 1)
+    publishDistanceForSensor(triggerId);
+
+    if (doorClosedOrClosing)
     {
-      mqttPublishDistanceIndoor(tofSensors->distanceCm(0));
+      recordClosedOrClosingTrigger(triggerId);
     }
-    else if (triggerId == 2)
-    {
-      mqttPublishDistanceOutdoor(tofSensors->distanceCm(1));
-    }
-    mqttPublishSensorTrigger(triggerId);
   }
 
   if (keepClosed)
@@ -272,6 +276,36 @@ void DoorController::processSensorUpdate(const TofSensorManager::UpdateResult &u
   {
     openDoor = update.anySensorQualified;
   }
+}
+
+void DoorController::publishDistanceForSensor(uint8_t triggerId)
+{
+  if (!tofSensors)
+  {
+    return;
+  }
+
+  switch (triggerId)
+  {
+  case 1:
+    mqttPublishDistanceIndoor(tofSensors->distanceCm(0));
+    break;
+  case 2:
+    mqttPublishDistanceOutdoor(tofSensors->distanceCm(1));
+    break;
+  default:
+    break;
+  }
+}
+
+void DoorController::recordClosedOrClosingTrigger(uint8_t triggerId)
+{
+  lastSensorTriggeredClosedOrClosing = triggerId;
+  if (displayService)
+  {
+    displayService->setLastSensorTriggered(triggerId);
+  }
+  mqttPublishSensorTrigger(triggerId);
 }
 
 void DoorController::checkOverrideSwitches()
