@@ -67,7 +67,7 @@ static std::array<String, TofSensorConfig::count> tofInitUniqueIds;
 static std::array<uint32_t, TofSensorConfig::count> tofInitCounters;
 static std::array<uint32_t, TofSensorConfig::count> tofInitPublished;
 static bool tofTopicsInitialized = false;
-static constexpr uint32_t kDistancePublishIntervalMs = 30000; // default 30s
+static constexpr uint32_t kDistancePublishIntervalMs = 10000; // default 10s
 
 // Longest discovery payload is just over 450 bytes once the shared device
 // metadata is injected, so give ourselves plenty of headroom.
