@@ -43,6 +43,7 @@ public:
 private:
   bool initialiseSensors(bool isReinit);
   void publishSensorStatus(uint8_t sensorIndex, bool ok, bool reportInitEvent);
+  uint16_t reportedDistanceMm(size_t index) const;
 
   DisplayService *display = nullptr;
   StatusPublisher statusPublisher;

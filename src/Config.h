@@ -26,7 +26,7 @@ struct TofSensorConfig
   uint8_t sclPin = 9;
   std::array<uint16_t, count> rangeThresholdMm{600, 300};
   uint16_t timeoutMs = 500;
-  uint32_t timingBudgetUs = 80000; // microseconds
+  uint32_t timingBudgetUs = 50000; // microseconds
   uint8_t startAddress = 0x2A;
   std::array<const char *, count> names{"Indoor", "Outdoor"};
   uint16_t errorValue = 65535;

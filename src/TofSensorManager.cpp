@@ -6,6 +6,7 @@
 
 namespace {
 constexpr unsigned long kReinitBackoffMs = 2000;
+constexpr uint16_t kIndoorMaxReportedDistanceMm = 2000;
 }
 
 TofSensorManager::TofSensorManager(DisplayService *displayService)
@@ -206,8 +207,8 @@ TofSensorManager::UpdateResult TofSensorManager::update()
 
     char indoor[12];
     char outdoor[12];
-    formatDistance(ranges[0], indoor, sizeof(indoor));
-    formatDistance(ranges[1], outdoor, sizeof(outdoor));
+    formatDistance(reportedDistanceMm(0), indoor, sizeof(indoor));
+    formatDistance(reportedDistanceMm(1), outdoor, sizeof(outdoor));
 
     char message[64];
     snprintf(message, sizeof(message), "IN:%scm OUT:%scm", indoor, outdoor);
@@ -217,13 +218,34 @@ TofSensorManager::UpdateResult TofSensorManager::update()
   return result;
 }
 
+uint16_t TofSensorManager::reportedDistanceMm(size_t index) const
+{
+  if (index >= kSensorCount)
+  {
+    return 0;
+  }
+
+  uint16_t mm = ranges[index];
+  if (mm == 0 || mm == Config.tof.errorValue)
+  {
+    return mm;
+  }
+
+  if (index == 0 && mm > kIndoorMaxReportedDistanceMm)
+  {
+    return kIndoorMaxReportedDistanceMm;
+  }
+
+  return mm;
+}
+
 float TofSensorManager::distanceCm(size_t index) const
 {
   if (index >= kSensorCount)
   {
     return -1.0f;
   }
-  uint16_t mm = ranges[index];
+  uint16_t mm = reportedDistanceMm(index);
   if (mm == 0 || mm == Config.tof.errorValue)
   {
     return -1.0f;
