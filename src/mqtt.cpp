@@ -68,6 +68,10 @@ static std::array<uint32_t, TofSensorConfig::count> tofInitCounters;
 static std::array<uint32_t, TofSensorConfig::count> tofInitPublished;
 static bool tofTopicsInitialized = false;
 static constexpr uint32_t kDistancePublishIntervalMs = 10000; // default 10s
+static unsigned long nextReconnectAttemptMs = 0;
+static uint8_t reconnectAttemptStep = 0;
+static constexpr unsigned long kReconnectBackoffBaseMs = 2000;
+static constexpr unsigned long kReconnectBackoffMaxMs = 60000;
 
 // Longest discovery payload is just over 450 bytes once the shared device
 // metadata is injected, so give ourselves plenty of headroom.
@@ -497,45 +501,71 @@ static void publishAllDistances() {
 }
 
 static void mqttReconnect() {
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (mqttClient.connected()) {
+    return;
+  }
 
-  while (!mqttClient.connected()) {
-    // Set LWT (availability) on connect attempt
-    if (mqttClient.connect(
-          kMqttClientId,
-          MQTT_USER, MQTT_PASSWORD,
-          kTopicAvailability, 0, true, "offline"
-        )) {
-      SERIAL_PRINT("[MQTT] Connected\n");
-      // Mark online (retain)
-      mqttClient.publish(kTopicAvailability, "online", true);
-      DisplayHelpers::setMQTTConnected(true);
+  if (WiFi.status() != WL_CONNECTED) {
+    nextReconnectAttemptMs = millis();
+    reconnectAttemptStep = 0;
+    return;
+  }
 
-      if (!discoveryPublished) publishDiscovery();
+  unsigned long now = millis();
+  if (now < nextReconnectAttemptMs) {
+    return;
+  }
 
-      const char* st = telemetry ? telemetry->getDoorStateString() : nullptr;
-      uint8_t triggerId = telemetry ? telemetry->getLastSensorTriggered() : 0;
-      mqttPublishDoorState(st);
-      publishAllDistances();
-      if (telemetry) {
-        mqttPublishLimitSwitchBottom(!telemetry->isLimitSwitchPressed(BottomLimitSwitch));
-        mqttPublishLimitSwitchTop(!telemetry->isLimitSwitchPressed(TopLimitSwitch));
-        mqttPublishSensorTrigger(triggerId);
-      }
-      for (size_t i = 0; i < Config.tof.count; ++i) {
-        if (tofStatusLatest[i] != -1) {
-          tofStatusPublished[i] = -1;
-          mqttPublishTOFSensorStatus(i, tofStatusLatest[i] == 1);
-        }
-        publishTofInitCount(i);
-      }
-      lastDoorState = st ? st : "";
-      lastSensorTriggerPublished = triggerId;
-      lastDistancePublish = millis();
-    } else {
-      SERIAL_PRINT("[MQTT] Connect failed rc=%d\n", mqttClient.state());
-      delay(2000);
+  // Set LWT (availability) on connect attempt
+  if (mqttClient.connect(
+        kMqttClientId,
+        MQTT_USER, MQTT_PASSWORD,
+        kTopicAvailability, 0, true, "offline"
+      )) {
+    SERIAL_PRINT("[MQTT] Connected\n");
+    // Mark online (retain)
+    mqttClient.publish(kTopicAvailability, "online", true);
+    DisplayHelpers::setMQTTConnected(true);
+
+    if (!discoveryPublished) {
+      publishDiscovery();
     }
+
+    const char* st = telemetry ? telemetry->getDoorStateString() : nullptr;
+    uint8_t triggerId = telemetry ? telemetry->getLastSensorTriggered() : 0;
+    mqttPublishDoorState(st);
+    publishAllDistances();
+    if (telemetry) {
+      mqttPublishLimitSwitchBottom(!telemetry->isLimitSwitchPressed(BottomLimitSwitch));
+      mqttPublishLimitSwitchTop(!telemetry->isLimitSwitchPressed(TopLimitSwitch));
+      mqttPublishSensorTrigger(triggerId);
+    }
+    for (size_t i = 0; i < Config.tof.count; ++i) {
+      if (tofStatusLatest[i] != -1) {
+        tofStatusPublished[i] = -1;
+        mqttPublishTOFSensorStatus(i, tofStatusLatest[i] == 1);
+      }
+      publishTofInitCount(i);
+    }
+    lastDoorState = st ? st : "";
+    lastSensorTriggerPublished = triggerId;
+    lastDistancePublish = millis();
+    reconnectAttemptStep = 0;
+    nextReconnectAttemptMs = now;
+  } else {
+    SERIAL_PRINT("[MQTT] Connect failed rc=%d\n", mqttClient.state());
+    unsigned long delayMs = kReconnectBackoffBaseMs;
+    if (reconnectAttemptStep > 0) {
+      unsigned long candidate = kReconnectBackoffBaseMs << reconnectAttemptStep;
+      delayMs = (candidate > kReconnectBackoffMaxMs) ? kReconnectBackoffMaxMs : candidate;
+    }
+    if (delayMs > kReconnectBackoffMaxMs) {
+      delayMs = kReconnectBackoffMaxMs;
+    }
+    if (reconnectAttemptStep < 5) {
+      ++reconnectAttemptStep;
+    }
+    nextReconnectAttemptMs = now + delayMs;
   }
 }
 
@@ -550,6 +580,8 @@ void mqttSetup(DoorTelemetryProvider *provider) {
   lastSensorTriggerPublished = telemetry ? telemetry->getLastSensorTriggered() : 0;
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setBufferSize(512);
+  reconnectAttemptStep = 0;
+  nextReconnectAttemptMs = 0;
 }
 
 void mqttLoop() {
