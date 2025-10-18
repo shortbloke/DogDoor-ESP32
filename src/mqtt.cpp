@@ -31,6 +31,7 @@ constexpr char kTopicLimitBottom[] = "dogdoor/limit/bottom";
 constexpr char kTopicLimitTop[] = "dogdoor/limit/top";
 constexpr char kTopicSensorTrigger[] = "dogdoor/sensor_trigger";
 constexpr char kTopicAvailability[] = "dogdoor/status";  // LWT + availability
+constexpr char kTopicDoorOpenCount[] = "dogdoor/door/open_count";
 constexpr char kTofStatusPayloadOk[] = "OK";
 constexpr char kTofStatusPayloadError[] = "ERROR";
 
@@ -45,6 +46,7 @@ constexpr char kDiscoveryDistanceOutdoorConfig[] = "homeassistant/sensor/dogdoor
 constexpr char kDiscoveryLimitBottomConfig[] = "homeassistant/binary_sensor/dogdoor/limit_bottom/config";
 constexpr char kDiscoveryLimitTopConfig[] = "homeassistant/binary_sensor/dogdoor/limit_top/config";
 constexpr char kDiscoverySensorTriggerConfig[] = "homeassistant/sensor/dogdoor/sensor_trigger/config";
+constexpr char kDiscoveryDoorOpenCountConfig[] = "homeassistant/sensor/dogdoor/door_open_count/config";
 
 // ---------- Internal State ----------
 static WiFiClient wifiClient;
@@ -55,6 +57,8 @@ static bool discoveryPublished = false;
 static String lastDoorState = "";
 static unsigned long lastDistancePublish = 0;
 static uint8_t lastSensorTriggerPublished = 0;
+static uint32_t lastDoorOpenCount = 0;
+static bool doorOpenCountValid = false;
 static std::array<String, TofSensorConfig::count> tofStatusTopics;
 static std::array<String, TofSensorConfig::count> tofStatusDiscoveryTopics;
 static std::array<String, TofSensorConfig::count> tofStatusUniqueIds;
@@ -115,6 +119,11 @@ static const char kSensorTriggerTemplate[] PROGMEM =
   "\"json_attributes_topic\":\"dogdoor/sensor_trigger_distance\",\"availability_topic\":\"%s\","
   "\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"icon\":\"mdi:arrow-decision\",\"device\":%s}";
 
+static const char kDoorOpenCountTemplate[] PROGMEM =
+  "{\"name\":\"Dog Door Open Count\",\"unique_id\":\"dogdoor_open_count\",\"state_topic\":\"%s\","
+  "\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+  "\"state_class\":\"total_increasing\",\"unit_of_measurement\":\"count\",\"icon\":\"mdi:counter\",\"device\":%s}";
+
 static const char kTofStatusTemplate[] PROGMEM =
   "{\"name\":\"Dog Door %s TOF Status\",\"unique_id\":\"%s\",\"device_class\":\"problem\",\"state_topic\":\"%s\","
   "\"payload_on\":\"%s\",\"payload_off\":\"%s\",\"availability_topic\":\"%s\",\"payload_available\":\"online\","
@@ -133,6 +142,7 @@ struct DiscoveryPayloadCache {
   char limitBottom[kDiscoveryPayloadBufferSize];
   char limitTop[kDiscoveryPayloadBufferSize];
   char sensorTrigger[kDiscoveryPayloadBufferSize];
+  char doorOpenCount[kDiscoveryPayloadBufferSize];
   std::array<std::array<char, kDiscoveryPayloadBufferSize>, TofSensorConfig::count> tofStatus{};
   std::array<std::array<char, kDiscoveryPayloadBufferSize>, TofSensorConfig::count> tofInit{};
 };
@@ -258,6 +268,14 @@ static void ensureDiscoveryPayloads() {
     sizeof(discoveryPayloads.sensorTrigger),
     kSensorTriggerTemplate,
     kTopicSensorTrigger,
+    kTopicAvailability,
+    deviceJson);
+
+  formatDiscoveryJson(
+    discoveryPayloads.doorOpenCount,
+    sizeof(discoveryPayloads.doorOpenCount),
+    kDoorOpenCountTemplate,
+    kTopicDoorOpenCount,
     kTopicAvailability,
     deviceJson);
 
@@ -422,6 +440,13 @@ void mqttPublishSensorTrigger(uint8_t triggerId) {
   mqttClient.publish(kTopicSensorTrigger, payload, true);
 }
 
+void mqttPublishDoorOpenCount(uint32_t count) {
+  if (!mqttClient.connected()) return;
+  char buffer[16];
+  snprintf(buffer, sizeof(buffer), "%lu", static_cast<unsigned long>(count));
+  mqttClient.publish(kTopicDoorOpenCount, buffer, true);
+}
+
 void mqttPublishTOFSensorStatus(uint8_t sensorIndex, bool measurementOk) {
   ensureTofTopicsInitialized();
   if (sensorIndex >= Config.tof.count) {
@@ -482,6 +507,7 @@ static void publishDiscovery() {
   ok &= publishIfChanged(kDiscoveryLimitBottomConfig, discoveryPayloads.limitBottom, publishedPayloads.limitBottom);
   ok &= publishIfChanged(kDiscoveryLimitTopConfig, discoveryPayloads.limitTop, publishedPayloads.limitTop);
   ok &= publishIfChanged(kDiscoverySensorTriggerConfig, discoveryPayloads.sensorTrigger, publishedPayloads.sensorTrigger);
+  ok &= publishIfChanged(kDiscoveryDoorOpenCountConfig, discoveryPayloads.doorOpenCount, publishedPayloads.doorOpenCount);
 
   for (size_t i = 0; i < Config.tof.count; ++i) {
     ok &= publishIfChanged(tofStatusDiscoveryTopics[i].c_str(), discoveryPayloads.tofStatus[i].data(), publishedPayloads.tofStatus[i].data());
@@ -533,23 +559,31 @@ static void mqttReconnect() {
 
     const char* st = telemetry ? telemetry->getDoorStateString() : nullptr;
     uint8_t triggerId = telemetry ? telemetry->getLastSensorTriggered() : 0;
-    mqttPublishDoorState(st);
-    publishAllDistances();
-    if (telemetry) {
-      mqttPublishLimitSwitchBottom(!telemetry->isLimitSwitchPressed(BottomLimitSwitch));
-      mqttPublishLimitSwitchTop(!telemetry->isLimitSwitchPressed(TopLimitSwitch));
-      mqttPublishSensorTrigger(triggerId);
-    }
-    for (size_t i = 0; i < Config.tof.count; ++i) {
-      if (tofStatusLatest[i] != -1) {
-        tofStatusPublished[i] = -1;
-        mqttPublishTOFSensorStatus(i, tofStatusLatest[i] == 1);
+      mqttPublishDoorState(st);
+      publishAllDistances();
+      if (telemetry) {
+        mqttPublishLimitSwitchBottom(!telemetry->isLimitSwitchPressed(BottomLimitSwitch));
+        mqttPublishLimitSwitchTop(!telemetry->isLimitSwitchPressed(TopLimitSwitch));
+        mqttPublishSensorTrigger(triggerId);
+        mqttPublishDoorOpenCount(telemetry->getDoorOpenCount());
+      }
+      for (size_t i = 0; i < Config.tof.count; ++i) {
+        if (tofStatusLatest[i] != -1) {
+          tofStatusPublished[i] = -1;
+          mqttPublishTOFSensorStatus(i, tofStatusLatest[i] == 1);
       }
       publishTofInitCount(i);
     }
-    lastDoorState = st ? st : "";
-    lastSensorTriggerPublished = triggerId;
-    lastDistancePublish = millis();
+      lastDoorState = st ? st : "";
+      lastSensorTriggerPublished = triggerId;
+      lastDistancePublish = millis();
+      if (telemetry) {
+        lastDoorOpenCount = telemetry->getDoorOpenCount();
+        doorOpenCountValid = true;
+      } else {
+        lastDoorOpenCount = 0;
+        doorOpenCountValid = false;
+      }
     reconnectAttemptStep = 0;
     nextReconnectAttemptMs = now;
   } else {
@@ -582,6 +616,8 @@ void mqttSetup(DoorTelemetryProvider *provider) {
   mqttClient.setBufferSize(512);
   reconnectAttemptStep = 0;
   nextReconnectAttemptMs = 0;
+  doorOpenCountValid = false;
+  lastDoorOpenCount = telemetry ? telemetry->getDoorOpenCount() : 0;
 }
 
 void mqttLoop() {
@@ -605,6 +641,12 @@ void mqttLoop() {
     if (triggerId != lastSensorTriggerPublished) {
       mqttPublishSensorTrigger(triggerId);
       lastSensorTriggerPublished = triggerId;
+    }
+    uint32_t openCount = telemetry->getDoorOpenCount();
+    if (!doorOpenCountValid || openCount != lastDoorOpenCount) {
+      mqttPublishDoorOpenCount(openCount);
+      lastDoorOpenCount = openCount;
+      doorOpenCountValid = true;
     }
   }
   // Periodic distance publish

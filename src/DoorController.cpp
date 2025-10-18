@@ -193,6 +193,11 @@ DoorState DoorController::getCurrentState() const
   return stateMachine.current();
 }
 
+uint32_t DoorController::getDoorOpenCount() const
+{
+  return doorOpenCount;
+}
+
 uint8_t DoorController::getLastSensorTriggered() const
 {
   return lastSensorTriggeredClosedOrClosing;
@@ -396,6 +401,8 @@ void DoorController::handleStateTransition(DoorState from, DoorState to, const c
   if (to == DoorState::Open)
   {
     openStateFirstEntry = true;
+    ++doorOpenCount;
+    mqttPublishDoorOpenCount(doorOpenCount);
   }
 }
 

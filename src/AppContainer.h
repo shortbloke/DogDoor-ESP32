@@ -31,6 +31,7 @@ private:
     float getDistanceOutdoorCm() const override { return door.getDistanceOutdoorCm(); }
     bool isLimitSwitchPressed(LimitSwitch sw) const override { return door.isLimitSwitchPressed(sw); }
     uint8_t getLastSensorTriggered() const override { return door.getLastSensorTriggered(); }
+    uint32_t getDoorOpenCount() const override { return door.getDoorOpenCount(); }
 
   private:
     DoorController &door;

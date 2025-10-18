@@ -11,4 +11,5 @@ public:
   virtual float getDistanceOutdoorCm() const = 0;
   virtual bool isLimitSwitchPressed(LimitSwitch sw) const = 0;
   virtual uint8_t getLastSensorTriggered() const = 0;
+  virtual uint32_t getDoorOpenCount() const = 0;
 };

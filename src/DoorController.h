@@ -34,6 +34,7 @@ public:
   DoorState getCurrentState() const;
   bool isWiFiConnected() const { return wifiConnected; }
 
+  uint32_t getDoorOpenCount() const;
   void refreshStateDisplay();
 
   // Returns debounced state of the given limit switch.
@@ -95,6 +96,7 @@ private:
   bool openStateFirstEntry = true;
   std::array<int8_t, LimitSwitchConfig::count> lastLimitSwitchState{{-1, -1}};
   uint8_t lastSensorTriggeredClosedOrClosing = 0;
+  uint32_t doorOpenCount = 0;
 
   void setPixelColor(uint8_t r, uint8_t g, uint8_t b);
 };
