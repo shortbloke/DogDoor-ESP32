@@ -6,7 +6,7 @@
 
 namespace {
 constexpr unsigned long kReinitBackoffMs = 2000;
-constexpr uint16_t kIndoorMaxReportedDistanceMm = 2000;
+constexpr uint16_t kIndoorMaxReportedDistanceMm = 1000;
 }
 
 TofSensorManager::TofSensorManager(DisplayService *displayService)

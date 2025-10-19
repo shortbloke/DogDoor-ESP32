@@ -24,7 +24,7 @@ struct TofSensorConfig
   std::array<uint8_t, count> xshutPins{7, 6};
   uint8_t sdaPin = 8;
   uint8_t sclPin = 9;
-  std::array<uint16_t, count> rangeThresholdMm{600, 300};
+  std::array<uint16_t, count> rangeThresholdMm{700, 300};
   uint16_t timeoutMs = 500;
   uint32_t timingBudgetUs = 50000; // microseconds
   uint8_t startAddress = 0x2A;
