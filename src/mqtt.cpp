@@ -10,6 +10,7 @@
 #include <pgmspace.h>
 #include "Secrets.h"
 #include "DisplayService.h"
+#include "DoorSafetyPolicy.h"
 #include "Version.h"
 
 // Serial debug print macro matches DoorController.cpp usage.
@@ -55,7 +56,9 @@ static DoorTelemetryProvider *telemetry = nullptr;
 static DisplayService *display = nullptr;
 
 static bool discoveryPublished = false;
-static String lastDoorState = "";
+static DoorState lastDoorState = DoorState::Closed;
+static bool lastDoorStateValid = false;
+static char lastDoorStateLabel[64] = {0};
 static unsigned long lastDistancePublish = 0;
 static uint8_t lastSensorTriggerPublished = 0;
 static uint32_t lastDoorOpenCount = 0;
@@ -392,21 +395,10 @@ static void publishTofInitCount(size_t sensorIndex) {
   }
 }
 
-static const char* normalizeDoorState(const char* raw) {
-  // Expecting "OPEN"/"CLOSED" ideally. Map anything else.
-  if (!raw) return "CLOSED";
-  String s = raw;
-  s.toUpperCase();
-  if (s.indexOf("OPEN") >= 0) return "OPEN";
-  if (s.indexOf("CLOSE") >= 0 || s == "SHUT" || s == "LOCKED") return "CLOSED";
-  return "CLOSED"; // binary sensor topics must only publish their two valid states
-}
+void mqttPublishDoorState(DoorState state, const char *label) {
+  const char *raw = label ? label : "UNKNOWN";
 
-void mqttPublishDoorState(const char* state) {
-  const char* normalized = normalizeDoorState(state);
-  const char* raw = state ? state : "UNKNOWN";
-
-  publishRetained(kTopicDoorState, normalized);
+  publishRetained(kTopicDoorState, binaryDoorState(state));
   publishRetained(kTopicDoorStateActual, raw);
 }
 
@@ -557,9 +549,10 @@ static void mqttReconnect() {
       publishDiscovery();
     }
 
-    const char* st = telemetry ? telemetry->getDoorStateString() : nullptr;
+    const char *label = telemetry ? telemetry->getDoorStateString() : nullptr;
+    const DoorState state = telemetry ? telemetry->getDoorState() : DoorState::Fault;
     uint8_t triggerId = telemetry ? telemetry->getLastSensorTriggered() : 0;
-    mqttPublishDoorState(st);
+    mqttPublishDoorState(state, label);
     publishAllDistances();
     if (telemetry) {
       mqttPublishLimitSwitchBottom(telemetry->isLimitSwitchPressed(BottomLimitSwitch));
@@ -574,7 +567,10 @@ static void mqttReconnect() {
       }
       publishTofInitCount(i);
     }
-    lastDoorState = st ? st : "";
+    lastDoorState = state;
+    lastDoorStateValid = true;
+    strncpy(lastDoorStateLabel, label ? label : "", sizeof(lastDoorStateLabel) - 1);
+    lastDoorStateLabel[sizeof(lastDoorStateLabel) - 1] = '\0';
     lastSensorTriggerPublished = triggerId;
     lastDistancePublish = millis();
     if (telemetry) {
@@ -611,7 +607,8 @@ void mqttSetup(DoorTelemetryProvider *provider, DisplayService *displayService) 
   telemetry = provider;
   display = displayService;
   discoveryPublished = false;
-  lastDoorState = "";
+  lastDoorStateValid = false;
+  lastDoorStateLabel[0] = '\0';
   lastSensorTriggerPublished = telemetry ? telemetry->getLastSensorTriggered() : 0;
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setBufferSize(1024);
@@ -631,12 +628,16 @@ void mqttLoop() {
   mqttClient.loop();
 
   // Door state change detection (polling)
-  const char* current = telemetry ? telemetry->getDoorStateString() : nullptr;
-  String cur = current ? current : "";
-  if (cur != lastDoorState) {
-    mqttPublishDoorState(cur.c_str());
+  const char *currentLabel = telemetry ? telemetry->getDoorStateString() : "";
+  const DoorState currentState = telemetry ? telemetry->getDoorState() : DoorState::Fault;
+  if (!lastDoorStateValid || currentState != lastDoorState ||
+      strncmp(currentLabel, lastDoorStateLabel, sizeof(lastDoorStateLabel)) != 0) {
+    mqttPublishDoorState(currentState, currentLabel);
     publishAllDistances(); // snapshot at transition
-    lastDoorState = cur;
+    lastDoorState = currentState;
+    lastDoorStateValid = true;
+    strncpy(lastDoorStateLabel, currentLabel, sizeof(lastDoorStateLabel) - 1);
+    lastDoorStateLabel[sizeof(lastDoorStateLabel) - 1] = '\0';
   }
 
   if (telemetry) {

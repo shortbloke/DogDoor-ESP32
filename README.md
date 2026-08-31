@@ -38,6 +38,7 @@ This is based on my earlier [Particle Photon DogDoor](https://github.com/shortbl
 │   ├── DiagnosticsService.cpp/h  # Serial diagnostics command handling
 │   ├── DisplayService.cpp/h      # Display service logic, fonts, and interface
 │   ├── DoorController.cpp/h      # Door controller orchestration and collaborators
+│   ├── DoorSafetyPolicy.h        # Pure, testable motion and reporting safety rules
 │   ├── DoorStateMachine.cpp/h    # Door state transitions and event dispatch
 │   ├── DoorTelemetryProvider.h   # Read-only MQTT telemetry interface
 │   ├── IconBitmaps.h             # Bitmap assets for status icons
@@ -113,6 +114,8 @@ password before running `pio run -e esp32_ota -t upload`.
 
 - The firmware publishes retained topics under the `dogdoor/` namespace (door
   state, distances, limit switches, sensor health, etc.).
+- The binary door topic reports `CLOSED` only for a confirmed closed state;
+  homing, movement, faults, and unknown states conservatively report `OPEN`.
 - Home Assistant discovery messages are automatically published when MQTT
   connects; entities appear under the `dogdoor` node.
 
@@ -141,6 +144,8 @@ limit switch readings, and TOF ranges/health.
   init, continuous reads, back-off retries) and exposes sensor health snapshots.
 - **DoorStateMachine** provides an auditable transition callback so door state
   changes are centralised and easy to trace.
+- **DoorSafetyPolicy** keeps endpoint, sensor-polling, and fail-safe MQTT rules
+  independent of hardware so they can be covered by native tests.
 
 ## Troubleshooting
 

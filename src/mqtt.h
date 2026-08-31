@@ -7,7 +7,7 @@ class DisplayService;
 void mqttSetup(DoorTelemetryProvider *provider, DisplayService *displayService);
 void mqttLoop();
 
-void mqttPublishDoorState(const char* state);
+void mqttPublishDoorState(DoorState state, const char *label);
 void mqttPublishDistanceIndoor(float cm);
 void mqttPublishDistanceOutdoor(float cm);
 void mqttPublishLimitSwitchTop(bool pressed);

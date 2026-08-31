@@ -4,10 +4,8 @@
 #include "DisplayService.h"
 #include "Secrets.h"
 
-void ConnectivityManager::begin(DoorController *doorController, DisplayService *displayService)
+void ConnectivityManager::begin()
 {
-  door = doorController;
-  display = displayService;
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(false);
   startConnectCycle();
@@ -80,10 +78,7 @@ void ConnectivityManager::startConnectCycle()
   showStatus("Connecting to WiFi...");
   Serial.println("Connecting to WiFi");
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  if (door)
-  {
-    door->setWiFiConnected(false);
-  }
+  door.setWiFiConnected(false);
 }
 
 void ConnectivityManager::handleConnected()
@@ -95,10 +90,7 @@ void ConnectivityManager::handleConnected()
   Serial.println(WiFi.localIP());
   Serial.print("MAC address : ");
   Serial.println(WiFi.macAddress());
-  if (door)
-  {
-    door->setWiFiConnected(true);
-  }
+  door.setWiFiConnected(true);
   if (!otaReady)
   {
     ArduinoOTA.setHostname(OTA_HOSTNAME);
@@ -107,10 +99,7 @@ void ConnectivityManager::handleConnected()
     showStatus("OTA Ready");
     otaReady = true;
   }
-  if (door)
-  {
-    door->refreshStateDisplay();
-  }
+  door.refreshStateDisplay();
 }
 
 void ConnectivityManager::handleDisconnected()
@@ -118,10 +107,7 @@ void ConnectivityManager::handleDisconnected()
   wifiConnected = false;
   showStatus("WiFi lost", true);
   Serial.println("WARN: WiFi disconnected");
-  if (door)
-  {
-    door->setWiFiConnected(false);
-  }
+  door.setWiFiConnected(false);
   scheduleRetry();
 }
 
@@ -131,10 +117,7 @@ void ConnectivityManager::handleConnectionFailure(wl_status_t status)
   const char *reason = statusDescription(status);
   showStatus(reason, true);
   Serial.printf("WARN: WiFi connection failure: %s (code=%d)\n", reason, static_cast<int>(status));
-  if (door)
-  {
-    door->setWiFiConnected(false);
-  }
+  door.setWiFiConnected(false);
   scheduleRetry();
 }
 
@@ -147,10 +130,7 @@ void ConnectivityManager::scheduleRetry()
 
 void ConnectivityManager::showStatus(const char *message, bool warning, int textSize)
 {
-  if (display)
-  {
-    display->showStatus(message, warning, textSize);
-  }
+  display.showStatus(message, warning, textSize);
 }
 
 const char *ConnectivityManager::statusDescription(wl_status_t status)

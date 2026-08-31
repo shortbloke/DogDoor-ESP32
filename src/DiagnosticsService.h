@@ -12,11 +12,10 @@ class ConnectivityManager;
 // trigger information.
 class DiagnosticsService {
 public:
-  DiagnosticsService() = default;
-
-  void begin(DoorController *doorController,
-             TofSensorManager *tofManager,
-             ConnectivityManager *connectivityManager);
+  DiagnosticsService(DoorController &doorController,
+                     TofSensorManager &tofManager,
+                     ConnectivityManager &connectivityManager)
+      : door(doorController), tof(tofManager), connectivity(connectivityManager) {}
 
   void loop();
 
@@ -26,9 +25,9 @@ private:
 
   static constexpr size_t kInputBufferSize = 64;
 
-  DoorController *door = nullptr;
-  TofSensorManager *tof = nullptr;
-  ConnectivityManager *connectivity = nullptr;
+  DoorController &door;
+  TofSensorManager &tof;
+  ConnectivityManager &connectivity;
 
   char inputBuffer[kInputBufferSize] = {0};
   size_t inputLength = 0;

@@ -5,8 +5,10 @@
 
 AppContainer::AppContainer()
     : display(kScreenWidth, kScreenHeight, &Wire),
-      tofSensors(&displayService),
-      door(statusPixel, displayService, tofSensors)
+      tofSensors(displayService),
+      door(statusPixel, displayService, tofSensors),
+      connectivity(door, displayService),
+      diagnostics(door, tofSensors, connectivity)
 {
 }
 
@@ -32,7 +34,7 @@ void AppContainer::begin()
   }
 
   statusPixel.setColor(255, 255, 0); // Yellow during WiFi connection
-  connectivity.begin(&door, &displayService);
+  connectivity.begin();
 
   statusPixel.setColor(255, 0, 0);
   door.setup();
@@ -41,7 +43,6 @@ void AppContainer::begin()
 
   statusPixel.setColor(0, 255, 0);
 
-  diagnostics.begin(&door, &tofSensors, &connectivity);
 }
 
 void AppContainer::loop()

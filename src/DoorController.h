@@ -28,6 +28,7 @@ public:
   void loop();
 
   const char *getStateString() const;
+  DoorState getDoorState() const override { return stateMachine.current(); }
   const char *getDoorStateString() const override { return getStateString(); }
   float getDistanceIndoorCm() const override;
   float getDistanceOutdoorCm() const override;

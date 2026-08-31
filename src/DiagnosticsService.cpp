@@ -4,24 +4,11 @@
 #include "TofSensorManager.h"
 #include "ConnectivityManager.h"
 #include "Version.h"
-
-void DiagnosticsService::begin(DoorController *doorController,
-                               TofSensorManager *tofManager,
-                               ConnectivityManager *connectivityManager)
-{
-  door = doorController;
-  tof = tofManager;
-  connectivity = connectivityManager;
-  inputLength = 0;
-}
+#include <cctype>
+#include <cstring>
 
 void DiagnosticsService::loop()
 {
-  if (!door || !tof)
-  {
-    return;
-  }
-
   while (Serial.available() > 0)
   {
     char c = static_cast<char>(Serial.read());
@@ -43,20 +30,33 @@ void DiagnosticsService::loop()
 
 void DiagnosticsService::handleCommand()
 {
-  String command(inputBuffer);
-  command.trim();
-  command.toLowerCase();
+  char *command = inputBuffer;
+  while (*command != '\0' && std::isspace(static_cast<unsigned char>(*command)))
+  {
+    ++command;
+  }
 
-  if (command.length() == 0)
+  char *end = command + std::strlen(command);
+  while (end > command && std::isspace(static_cast<unsigned char>(end[-1])))
+  {
+    *--end = '\0';
+  }
+  for (char *p = command; *p != '\0'; ++p)
+  {
+    *p = static_cast<char>(std::tolower(static_cast<unsigned char>(*p)));
+  }
+
+  if (*command == '\0')
   {
     return;
   }
 
-  if (command == "d" || command == "diag" || command == "status")
+  if (std::strcmp(command, "d") == 0 || std::strcmp(command, "diag") == 0 ||
+      std::strcmp(command, "status") == 0)
   {
     printStatus();
   }
-  else if (command == "help")
+  else if (std::strcmp(command, "help") == 0)
   {
     Serial.println(F("Diagnostics commands:"));
     Serial.println(F("  diag | d | status  - print current door diagnostics"));
@@ -85,32 +85,32 @@ void DiagnosticsService::printStatus() const
   }
   Serial.println();
 
-  const char *state = door->getStateString();
+  const char *state = door.getStateString();
   Serial.print(F("Door state: "));
   Serial.println(state ? state : "UNKNOWN");
   Serial.print(F("Fault motor hold: "));
-  Serial.println(door->isFaultMotorHolding() ? F("active") : F("inactive"));
+  Serial.println(door.isFaultMotorHolding() ? F("active") : F("inactive"));
 
   Serial.print(F("WiFi connected: "));
-  bool wifiOk = connectivity ? connectivity->isConnected() : door->isWiFiConnected();
+  bool wifiOk = connectivity.isConnected();
   Serial.println(wifiOk ? F("yes") : F("no"));
 
   Serial.print(F("Last trigger: "));
-  Serial.println(door->getLastSensorTriggered());
+  Serial.println(door.getLastSensorTriggered());
 
   Serial.print(F("Indoor distance (cm): "));
-  Serial.println(door->getDistanceIndoorCm(), 2);
+  Serial.println(door.getDistanceIndoorCm(), 2);
   Serial.print(F("Outdoor distance (cm): "));
-  Serial.println(door->getDistanceOutdoorCm(), 2);
+  Serial.println(door.getDistanceOutdoorCm(), 2);
 
   Serial.print(F("Limit bottom pressed: "));
-  Serial.println(door->isLimitSwitchPressed(BottomLimitSwitch) ? F("yes") : F("no"));
+  Serial.println(door.isLimitSwitchPressed(BottomLimitSwitch) ? F("yes") : F("no"));
   Serial.print(F("Limit top pressed: "));
-  Serial.println(door->isLimitSwitchPressed(TopLimitSwitch) ? F("yes") : F("no"));
+  Serial.println(door.isLimitSwitchPressed(TopLimitSwitch) ? F("yes") : F("no"));
 
-  const auto &ranges = tof->rangesMm();
-  const auto &ready = tof->readyFlags();
-  const auto &measurement = tof->measurementFlags();
+  const auto &ranges = tof.rangesMm();
+  const auto &ready = tof.readyFlags();
+  const auto &measurement = tof.measurementFlags();
 
   for (size_t i = 0; i < TofSensorConfig::count; ++i)
   {

@@ -6,6 +6,7 @@
 class DoorTelemetryProvider {
 public:
   virtual ~DoorTelemetryProvider() = default;
+  virtual DoorState getDoorState() const = 0;
   virtual const char *getDoorStateString() const = 0;
   virtual float getDistanceIndoorCm() const = 0;
   virtual float getDistanceOutdoorCm() const = 0;

@@ -1,4 +1,5 @@
 #include "DoorController.h"
+#include "DoorSafetyPolicy.h"
 #include "DisplayService.h"
 #include "StatusPixel.h"
 #include "mqtt.h"
@@ -144,8 +145,11 @@ void DoorController::loop()
     }
   }
 
-  auto update = tofSensors.update();
-  processSensorUpdate(update);
+  if (shouldPollTofSensors(stateMachine.current()))
+  {
+    auto update = tofSensors.update();
+    processSensorUpdate(update);
+  }
 
   checkOverrideSwitches();
   handleState();
@@ -376,10 +380,24 @@ void DoorController::handleState()
     return;
   }
 
-  if (isLimitSwitchPressedRaw(BottomLimitSwitch) && isLimitSwitchPressedRaw(TopLimitSwitch))
+  const bool bottomPressed = isLimitSwitchPressedRaw(BottomLimitSwitch);
+  const bool topPressed = isLimitSwitchPressedRaw(TopLimitSwitch);
+  switch (limitSafetyAction(stateMachine.current(), bottomPressed, topPressed))
   {
+  case LimitSafetyAction::FaultConflictingLimits:
     enterFault("Both limit switches active");
     return;
+  case LimitSafetyAction::CompleteHoming:
+    handleHomingState();
+    return;
+  case LimitSafetyAction::CompleteOpening:
+    handleOpeningState();
+    return;
+  case LimitSafetyAction::CompleteClosing:
+    handleClosingState();
+    return;
+  case LimitSafetyAction::None:
+    break;
   }
   switch (stateMachine.current())
   {

@@ -14,7 +14,7 @@ bool deadlineReached(unsigned long now, unsigned long deadline)
 }
 }
 
-TofSensorManager::TofSensorManager(DisplayService *displayService)
+TofSensorManager::TofSensorManager(DisplayService &displayService)
     : display(displayService) {}
 
 void TofSensorManager::setStatusPublisher(StatusPublisher publisher)
@@ -35,10 +35,7 @@ bool TofSensorManager::begin(bool allowRetry)
 
   sensorInitNeeded = true;
   nextReinitAttemptMs = millis() + kReinitBackoffMs;
-  if (display)
-  {
-    display->showStatus("VL53L0X retry pending", true);
-  }
+  display.showStatus("VL53L0X retry pending", true);
   return false;
 }
 
@@ -140,7 +137,7 @@ TofSensorManager::UpdateResult TofSensorManager::update()
     }
   }
 
-  if (Config.tof.enableDebugDisplay && display)
+  if (Config.tof.enableDebugDisplay)
   {
     auto formatDistance = [](uint16_t mm, char *out, size_t len) {
       if (len == 0)
@@ -172,7 +169,7 @@ TofSensorManager::UpdateResult TofSensorManager::update()
 
     char message[64];
     snprintf(message, sizeof(message), "IN:%scm OUT:%scm", indoor, outdoor);
-    display->showStatus(message);
+    display.showStatus(message);
   }
 
   return result;
@@ -257,11 +254,11 @@ bool TofSensorManager::initialiseSensors(bool isReinit)
     {
       publishSensorStatus(static_cast<uint8_t>(i), false, false);
       success = false;
-      if (display && !isReinit)
+      if (!isReinit)
       {
         char errorMsg[64];
         snprintf(errorMsg, sizeof(errorMsg), "ERROR:%s sensor failed!", Config.tof.names[i]);
-        display->showStatus(errorMsg, true);
+        display.showStatus(errorMsg, true);
       }
       continue;
     }
@@ -278,11 +275,11 @@ bool TofSensorManager::initialiseSensors(bool isReinit)
 
     publishSensorStatus(static_cast<uint8_t>(i), true, true);
 
-    if (display && !isReinit)
+    if (!isReinit)
     {
       char statusMsg[64];
       snprintf(statusMsg, sizeof(statusMsg), "%s sensor at 0x%X", Config.tof.names[i], sensor.getAddress());
-      display->showStatus(statusMsg);
+      display.showStatus(statusMsg);
     }
   }
 

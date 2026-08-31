@@ -22,7 +22,7 @@ public:
 
   using StatusPublisher = std::function<void(uint8_t sensorIndex, bool ok, bool reportInitEvent)>;
 
-  explicit TofSensorManager(DisplayService *displayService = nullptr);
+  explicit TofSensorManager(DisplayService &displayService);
 
   void setStatusPublisher(StatusPublisher publisher);
 
@@ -41,7 +41,7 @@ private:
   void resetMeasurementState(size_t index);
   uint16_t reportedDistanceMm(size_t index) const;
 
-  DisplayService *display = nullptr;
+  DisplayService &display;
   StatusPublisher statusPublisher;
 
   std::array<VL53L0X, kSensorCount> sensors;
