@@ -9,8 +9,8 @@ from SCons.Script import Import  # type: ignore
 
 Import("env")  # type: ignore # noqa: F821 pylint: disable=undefined-variable
 
-PROJECT_DIR = Path(env["PROJECT_DIR"])  # type: ignore # noqa: F821 pylint: disable=undefined-variable
-SRC_DIR = Path(env["PROJECTSRC_DIR"])  # type: ignore # noqa: F821 pylint: disable=undefined-variable
+PROJECT_DIR = Path(env.subst("$PROJECT_DIR"))  # type: ignore # noqa: F821 pylint: disable=undefined-variable
+SRC_DIR = Path(env.subst("$PROJECT_SRC_DIR"))  # type: ignore # noqa: F821 pylint: disable=undefined-variable
 OUTPUT_PATH = SRC_DIR / "Version.h"
 STATE_PATH = PROJECT_DIR / ".pio" / "version_state.json"
 FALLBACK_VERSION = "1.0.0"

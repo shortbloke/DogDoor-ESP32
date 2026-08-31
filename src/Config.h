@@ -2,6 +2,7 @@
 // Config.h - Central configuration for DogDoor-ESP32 hardware and logic.
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 struct LimitSwitchConfig
