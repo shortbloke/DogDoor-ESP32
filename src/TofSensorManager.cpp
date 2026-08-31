@@ -310,7 +310,7 @@ bool TofSensorManager::initialiseSensors(bool isReinit)
     }
 
     sensor.setAddress(Config.tof.startAddress + i);
-    sensor.setMeasurementTimingBudget(Config.tof.timingBudgetUs);
+    configureSensor(sensor, i);
     sensor.startContinuous();
 
     sensorReady[i] = true;
@@ -336,6 +336,18 @@ bool TofSensorManager::initialiseSensors(bool isReinit)
   }
 
   return success;
+}
+
+void TofSensorManager::configureSensor(VL53L0X &sensor, size_t index)
+{
+  sensor.setMeasurementTimingBudget(Config.tof.timingBudgetUs);
+
+  if (index == static_cast<size_t>(TOFSensor::IndoorSensor))
+  {
+    sensor.setSignalRateLimit(0.1f);
+    sensor.setVcselPulsePeriod(VL53L0X::VcselPeriodPreRange, 18);
+    sensor.setVcselPulsePeriod(VL53L0X::VcselPeriodFinalRange, 14);
+  }
 }
 
 void TofSensorManager::publishSensorStatus(uint8_t sensorIndex, bool ok, bool reportInitEvent)

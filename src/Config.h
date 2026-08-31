@@ -26,12 +26,12 @@ struct TofSensorConfig
   uint8_t sclPin = 9;
   std::array<uint16_t, count> rangeThresholdMm{700, 300};
   uint16_t timeoutMs = 500;
-  uint32_t timingBudgetUs = 50000; // microseconds
+  uint32_t timingBudgetUs = 33000; // microseconds
   uint8_t startAddress = 0x2A;
   std::array<const char *, count> names{"Indoor", "Outdoor"};
   uint16_t errorValue = 65535;
   uint16_t maxConsideredDistanceMm = 1000;
-  uint8_t consecutiveReadingsForTrigger = 4;
+  uint8_t consecutiveReadingsForTrigger = 6;
   bool enableDebugDisplay = false;
 };
 
@@ -44,7 +44,7 @@ struct StepperConfig
   int32_t stepsPerSecond = 17500;
   int32_t acceleration = 17500;
   int32_t expectedClosePosition = 0;
-  int32_t seekIncrementSteps = 10;
+  int32_t seekIncrementSteps = 100;
 };
 
 struct TimingConfig

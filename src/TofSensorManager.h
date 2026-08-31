@@ -42,6 +42,7 @@ public:
 
 private:
   bool initialiseSensors(bool isReinit);
+  void configureSensor(VL53L0X &sensor, size_t index);
   void publishSensorStatus(uint8_t sensorIndex, bool ok, bool reportInitEvent);
   uint16_t reportedDistanceMm(size_t index) const;
 
