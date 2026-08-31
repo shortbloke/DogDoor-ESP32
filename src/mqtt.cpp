@@ -562,8 +562,8 @@ static void mqttReconnect() {
     mqttPublishDoorState(st);
     publishAllDistances();
     if (telemetry) {
-      mqttPublishLimitSwitchBottom(!telemetry->isLimitSwitchPressed(BottomLimitSwitch));
-      mqttPublishLimitSwitchTop(!telemetry->isLimitSwitchPressed(TopLimitSwitch));
+      mqttPublishLimitSwitchBottom(telemetry->isLimitSwitchPressed(BottomLimitSwitch));
+      mqttPublishLimitSwitchTop(telemetry->isLimitSwitchPressed(TopLimitSwitch));
       mqttPublishSensorTrigger(triggerId);
       mqttPublishDoorOpenCount(telemetry->getDoorOpenCount());
     }

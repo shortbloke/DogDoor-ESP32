@@ -9,6 +9,7 @@ struct LimitSwitchConfig
 {
   static constexpr size_t count = 2;
   std::array<uint8_t, count> pins{1, 2};
+  // Normally-closed switches hold the input LOW and read HIGH at the limit.
   bool activeHigh = true;
   int debounceMs = 2;
 };

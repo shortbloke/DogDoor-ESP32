@@ -119,12 +119,9 @@ void DoorController::setup()
       stepper->setCurrentPosition(Config.stepper.expectedClosePosition);
     }
   }
-  else if (stepper)
+  else
   {
-    stateMachine.transitionTo(DoorState::Homing, "Startup position unknown");
-    stepper->enableOutputs();
-    startMotionWatch();
-    seekLimitSwitch(-1, Config.stepper.seekIncrementSteps);
+    enterFault("Close door before startup");
   }
 
   SERIAL_PRINT("Setup END\n");
@@ -148,11 +145,11 @@ void DoorController::loop()
       lastLimitSwitchState[i] = pressedVal;
       if (i == BottomLimitSwitch)
       {
-        mqttPublishLimitSwitchBottom(!pressed); // invert for MQTT wiring polarity
+        mqttPublishLimitSwitchBottom(pressed);
       }
       else if (i == TopLimitSwitch)
       {
-        mqttPublishLimitSwitchTop(!pressed); // invert for MQTT wiring polarity
+        mqttPublishLimitSwitchTop(pressed);
       }
     }
   }
@@ -236,6 +233,11 @@ void DoorController::refreshStateDisplay()
 // -----------------------------------------------------------------------------
 void DoorController::setupStepper()
 {
+  // Keep the active-low driver disabled throughout reset-time initialization.
+  pinMode(Config.stepper.enablePin, OUTPUT);
+  digitalWrite(Config.stepper.enablePin,
+               Config.stepper.enableActiveLow ? HIGH : LOW);
+
   engine.init();
   stepper = engine.stepperConnectToPin(Config.stepper.stepPin);
   if (stepper)
@@ -246,6 +248,7 @@ void DoorController::setupStepper()
     stepper->setSpeedInHz(Config.stepper.stepsPerSecond);
     stepper->setAcceleration(Config.stepper.acceleration);
     stepper->setCurrentPosition(0);
+    stepper->disableOutputs();
   }
   else
   {
