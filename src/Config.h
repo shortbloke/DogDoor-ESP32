@@ -26,7 +26,7 @@ struct TofSensorConfig
   uint8_t sdaPin = 8;
   uint8_t sclPin = 9;
   std::array<uint16_t, count> rangeThresholdMm{700, 300};
-  uint16_t timeoutMs = 500;
+  uint16_t timeoutMs = 50;
   uint32_t timingBudgetUs = 33000; // microseconds
   uint8_t startAddress = 0x2A;
   std::array<const char *, count> names{"Indoor", "Outdoor"};
@@ -46,6 +46,8 @@ struct StepperConfig
   int32_t acceleration = 17500;
   int32_t expectedClosePosition = 0;
   int32_t seekIncrementSteps = 100;
+  int32_t maximumTravelSteps = 120000;
+  unsigned long maximumMotionMs = 15000;
 };
 
 struct TimingConfig
@@ -77,10 +79,12 @@ extern const ConfigData Config;
 // --- Door State Enum ---
 enum class DoorState
 {
+  Homing,
   Closed,
   Opening,
   Open,
-  Closing
+  Closing,
+  Fault
 };
 
 // --- Limit Switch Enum ---

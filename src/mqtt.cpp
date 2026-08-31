@@ -116,7 +116,7 @@ static const char kLimitTemplate[] PROGMEM =
 
 static const char kSensorTriggerTemplate[] PROGMEM =
   "{\"name\":\"Dog Door Sensor Trigger\",\"unique_id\":\"dogdoor_sensor_trigger\",\"state_topic\":\"%s\","
-  "\"json_attributes_topic\":\"dogdoor/sensor_trigger_distance\",\"availability_topic\":\"%s\","
+  "\"availability_topic\":\"%s\","
   "\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"icon\":\"mdi:arrow-decision\",\"device\":%s}";
 
 static const char kDoorOpenCountTemplate[] PROGMEM =
@@ -394,8 +394,8 @@ static const char* normalizeDoorState(const char* raw) {
   String s = raw;
   s.toUpperCase();
   if (s.indexOf("OPEN") >= 0) return "OPEN";
-  if (s.indexOf("CLOSE") >= 0 || s == "SHUT") return "CLOSED";
-  return raw; // pass through if custom
+  if (s.indexOf("CLOSE") >= 0 || s == "SHUT" || s == "LOCKED") return "CLOSED";
+  return "CLOSED"; // binary sensor topics must only publish their two valid states
 }
 
 void mqttPublishDoorState(const char* state) {
@@ -538,7 +538,7 @@ static void mqttReconnect() {
   }
 
   unsigned long now = millis();
-  if (now < nextReconnectAttemptMs) {
+  if (static_cast<long>(now - nextReconnectAttemptMs) < 0) {
     return;
   }
 
@@ -559,31 +559,31 @@ static void mqttReconnect() {
 
     const char* st = telemetry ? telemetry->getDoorStateString() : nullptr;
     uint8_t triggerId = telemetry ? telemetry->getLastSensorTriggered() : 0;
-      mqttPublishDoorState(st);
-      publishAllDistances();
-      if (telemetry) {
-        mqttPublishLimitSwitchBottom(!telemetry->isLimitSwitchPressed(BottomLimitSwitch));
-        mqttPublishLimitSwitchTop(!telemetry->isLimitSwitchPressed(TopLimitSwitch));
-        mqttPublishSensorTrigger(triggerId);
-        mqttPublishDoorOpenCount(telemetry->getDoorOpenCount());
-      }
-      for (size_t i = 0; i < Config.tof.count; ++i) {
-        if (tofStatusLatest[i] != -1) {
-          tofStatusPublished[i] = -1;
-          mqttPublishTOFSensorStatus(i, tofStatusLatest[i] == 1);
+    mqttPublishDoorState(st);
+    publishAllDistances();
+    if (telemetry) {
+      mqttPublishLimitSwitchBottom(!telemetry->isLimitSwitchPressed(BottomLimitSwitch));
+      mqttPublishLimitSwitchTop(!telemetry->isLimitSwitchPressed(TopLimitSwitch));
+      mqttPublishSensorTrigger(triggerId);
+      mqttPublishDoorOpenCount(telemetry->getDoorOpenCount());
+    }
+    for (size_t i = 0; i < Config.tof.count; ++i) {
+      if (tofStatusLatest[i] != -1) {
+        tofStatusPublished[i] = -1;
+        mqttPublishTOFSensorStatus(i, tofStatusLatest[i] == 1);
       }
       publishTofInitCount(i);
     }
-      lastDoorState = st ? st : "";
-      lastSensorTriggerPublished = triggerId;
-      lastDistancePublish = millis();
-      if (telemetry) {
-        lastDoorOpenCount = telemetry->getDoorOpenCount();
-        doorOpenCountValid = true;
-      } else {
-        lastDoorOpenCount = 0;
-        doorOpenCountValid = false;
-      }
+    lastDoorState = st ? st : "";
+    lastSensorTriggerPublished = triggerId;
+    lastDistancePublish = millis();
+    if (telemetry) {
+      lastDoorOpenCount = telemetry->getDoorOpenCount();
+      doorOpenCountValid = true;
+    } else {
+      lastDoorOpenCount = 0;
+      doorOpenCountValid = false;
+    }
     reconnectAttemptStep = 0;
     nextReconnectAttemptMs = now;
   } else {
@@ -613,7 +613,7 @@ void mqttSetup(DoorTelemetryProvider *provider) {
   lastDoorState = "";
   lastSensorTriggerPublished = telemetry ? telemetry->getLastSensorTriggered() : 0;
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
-  mqttClient.setBufferSize(512);
+  mqttClient.setBufferSize(1024);
   reconnectAttemptStep = 0;
   nextReconnectAttemptMs = 0;
   doorOpenCountValid = false;

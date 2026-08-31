@@ -7,6 +7,11 @@
 namespace {
 constexpr unsigned long kReinitBackoffMs = 2000;
 constexpr uint16_t kIndoorMaxReportedDistanceMm = 1000;
+
+bool deadlineReached(unsigned long now, unsigned long deadline)
+{
+  return static_cast<long>(now - deadline) >= 0;
+}
 }
 
 TofSensorManager::TofSensorManager(DisplayService *displayService)
@@ -33,24 +38,23 @@ bool TofSensorManager::begin(bool allowRetry)
     return false;
   }
 
-  unsigned attempt = 0;
-  while (!initialiseSensors(false))
+  if (allowRetry)
   {
-    ++attempt;
+    sensorInitNeeded = true;
+    nextReinitAttemptMs = millis() + kReinitBackoffMs;
     if (display)
     {
-      display->showStatus("Retrying VL53L0X init", true);
+      display->showStatus("VL53L0X retry pending", true);
     }
-    delay(Config.timing.setupDelayMs);
   }
-  (void)attempt;
-  return true;
+  return false;
 }
 
 TofSensorManager::UpdateResult TofSensorManager::update()
 {
   UpdateResult result;
   unsigned long now = millis();
+  result.rangesMm = ranges;
 
   if (!sensorInitNeeded && (now - lastSensorInitMs >= Config.timing.sensorReinitIntervalMs))
   {
@@ -60,7 +64,11 @@ TofSensorManager::UpdateResult TofSensorManager::update()
 
   for (size_t i = 0; i < kSensorCount; ++i)
   {
-    bool withinGrace = now < sensorStatusSuppressUntil[i];
+    if (i != nextSensorToPoll)
+    {
+      continue;
+    }
+    bool withinGrace = !deadlineReached(now, sensorStatusSuppressUntil[i]);
     auto &sensor = sensors[i];
     measurementOk[i] = false;
 
@@ -74,20 +82,24 @@ TofSensorManager::UpdateResult TofSensorManager::update()
     }
 
     uint16_t reading = sensor.readRangeContinuousMillimeters();
+    const bool timedOut = sensor.timeoutOccurred();
     ranges[i] = reading;
     result.rangesMm[i] = reading;
 
     if (withinGrace)
     {
-      (void)sensor.timeoutOccurred();
       sensorBelowThreshold[i] = false;
       sensorBelowStreak[i] = 0;
-      measurementOk[i] = true;
-      publishSensorStatus(static_cast<uint8_t>(i), true, false);
+      measurementOk[i] = !timedOut && sensor.last_status == 0 &&
+                         reading != 0 && reading != Config.tof.errorValue;
+      if (measurementOk[i])
+      {
+        publishSensorStatus(static_cast<uint8_t>(i), true, false);
+      }
       continue;
     }
 
-    if (sensor.timeoutOccurred())
+    if (timedOut)
     {
       publishSensorStatus(static_cast<uint8_t>(i), false, false);
       sensorBelowThreshold[i] = false;
@@ -98,12 +110,16 @@ TofSensorManager::UpdateResult TofSensorManager::update()
     if (sensor.last_status != 0)
     {
       publishSensorStatus(static_cast<uint8_t>(i), false, false);
+      sensorBelowThreshold[i] = false;
+      sensorBelowStreak[i] = 0;
       continue;
     }
 
     if (reading == 0)
     {
       publishSensorStatus(static_cast<uint8_t>(i), false, false);
+      sensorBelowThreshold[i] = false;
+      sensorBelowStreak[i] = 0;
       continue;
     }
 
@@ -159,12 +175,20 @@ TofSensorManager::UpdateResult TofSensorManager::update()
     }
   }
 
+  nextSensorToPoll = (nextSensorToPoll + 1) % kSensorCount;
+  result.anySensorQualified = false;
+  for (bool qualified : sensorBelowThreshold)
+  {
+    result.anySensorQualified = result.anySensorQualified || qualified;
+  }
+
   if (result.triggerEvent)
   {
     lastSensorTriggered = result.triggerSensorId;
   }
 
-  if (sensorInitNeeded && millis() >= nextReinitAttemptMs)
+  now = millis();
+  if (sensorInitNeeded && deadlineReached(now, nextReinitAttemptMs))
   {
     if (initialiseSensors(true))
     {

@@ -21,13 +21,19 @@ void AppContainer::begin()
   ums3.setPixelBrightness(kPixelBrightness);
   ums3.setPixelPower(true);
 
-  display.begin(SSD1306_SWITCHCAPVCC, kScreenAddress);
-  displayService.attach(&display);
-  DisplayHelpers::setService(&displayService);
-  displayService.setWiFiConnected(false);
-  displayService.setMQTTConnected(false);
-  displayService.setLastSensorTriggered(0);
-  displayService.showStatus("Connecting to WiFi...");
+  if (display.begin(SSD1306_SWITCHCAPVCC, kScreenAddress))
+  {
+    displayService.attach(&display);
+    DisplayHelpers::setService(&displayService);
+    displayService.setWiFiConnected(false);
+    displayService.setMQTTConnected(false);
+    displayService.setLastSensorTriggered(0);
+    displayService.showStatus("Connecting to WiFi...");
+  }
+  else
+  {
+    Serial.println("OLED initialization failed; continuing without display");
+  }
 
   ums3.setPixelColor(255, 255, 0); // Yellow during WiFi connection
   connectivity.begin(&door, &display);

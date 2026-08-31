@@ -16,6 +16,4 @@ public:
     static void setMQTTConnected(bool connected);
     static void setLastSensorTriggered(uint8_t sensorId);
 
-private:
-    static DisplayService *service;
 };

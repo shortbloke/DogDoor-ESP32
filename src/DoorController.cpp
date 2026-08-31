@@ -108,6 +108,25 @@ void DoorController::setup()
   pinMode(Config.overrides.keepOpenPin, INPUT_PULLDOWN);
   pinMode(Config.overrides.keepClosedPin, INPUT_PULLDOWN);
 
+  if (isLimitSwitchPressedRaw(BottomLimitSwitch) && isLimitSwitchPressedRaw(TopLimitSwitch))
+  {
+    enterFault("Both limit switches active");
+  }
+  else if (isLimitSwitchPressedRaw(BottomLimitSwitch))
+  {
+    if (stepper)
+    {
+      stepper->setCurrentPosition(Config.stepper.expectedClosePosition);
+    }
+  }
+  else if (stepper)
+  {
+    stateMachine.transitionTo(DoorState::Homing, "Startup position unknown");
+    stepper->enableOutputs();
+    startMotionWatch();
+    seekLimitSwitch(-1, Config.stepper.seekIncrementSteps);
+  }
+
   SERIAL_PRINT("Setup END\n");
 
   refreshStateDisplay();
@@ -157,6 +176,8 @@ const char *DoorController::getStateString() const
 
   switch (stateMachine.current())
   {
+  case DoorState::Homing:
+    return "HOMING";
   case DoorState::Open:
     return "OPEN";
   case DoorState::Closed:
@@ -165,6 +186,8 @@ const char *DoorController::getStateString() const
     return "OPENING";
   case DoorState::Closing:
     return "CLOSING";
+  case DoorState::Fault:
+    return "FAULT";
   default:
     return "UNKNOWN";
   }
@@ -316,6 +339,17 @@ void DoorController::recordClosedOrClosingTrigger(uint8_t triggerId)
 void DoorController::checkOverrideSwitches()
 {
   const bool keepOpenActive = digitalRead(Config.overrides.keepOpenPin) == HIGH;
+  const bool keepClosedActive = digitalRead(Config.overrides.keepClosedPin) == HIGH;
+  if (keepOpenActive && keepClosedActive)
+  {
+    if (!overrideConflict)
+    {
+      overrideConflict = true;
+      enterFault("Conflicting overrides");
+    }
+    return;
+  }
+  overrideConflict = false;
   if (keepOpenActive && !keepOpen)
   {
     openDoor = true;
@@ -331,6 +365,7 @@ void DoorController::checkOverrideSwitches()
       stateMachine.transitionTo(DoorState::Closing, "Keep-open deactivated");
       fastClosing = true;
       displayedSeekBottomHint = false;
+      startMotionWatch();
       stepper->moveTo(Config.stepper.expectedClosePosition, false);
     }
     else
@@ -340,7 +375,6 @@ void DoorController::checkOverrideSwitches()
     SERIAL_PRINT("Override keep open switch deactivated. Resuming normal operation.\n");
   }
 
-  const bool keepClosedActive = digitalRead(Config.overrides.keepClosedPin) == HIGH;
   if (keepClosedActive && !keepClosed)
   {
     openDoor = false;
@@ -352,6 +386,7 @@ void DoorController::checkOverrideSwitches()
         stateMachine.transitionTo(DoorState::Closing, "Keep-closed engaged");
         fastClosing = true;
         displayedSeekBottomHint = false;
+        startMotionWatch();
         stepper->moveTo(Config.stepper.expectedClosePosition, false);
       }
       else
@@ -373,8 +408,16 @@ void DoorController::checkOverrideSwitches()
 
 void DoorController::handleState()
 {
+  if (isLimitSwitchPressedRaw(BottomLimitSwitch) && isLimitSwitchPressedRaw(TopLimitSwitch))
+  {
+    enterFault("Both limit switches active");
+    return;
+  }
   switch (stateMachine.current())
   {
+  case DoorState::Homing:
+    handleHomingState();
+    break;
   case DoorState::Closed:
     handleClosedState();
     break;
@@ -387,6 +430,33 @@ void DoorController::handleState()
   case DoorState::Closing:
     handleClosingState();
     break;
+  case DoorState::Fault:
+    break;
+  }
+}
+
+void DoorController::handleHomingState()
+{
+  if (!stepper)
+  {
+    enterFault("Stepper unavailable");
+    return;
+  }
+  if (isLimitSwitchPressedRaw(BottomLimitSwitch))
+  {
+    stepper->forceStopAndNewPosition(Config.stepper.expectedClosePosition);
+    stepper->disableOutputs();
+    stateMachine.transitionTo(DoorState::Closed, "Homing complete");
+    return;
+  }
+  if (motionLimitExceeded())
+  {
+    enterFault("Homing limit exceeded");
+    return;
+  }
+  if (!stepper->isRunning())
+  {
+    seekLimitSwitch(-1, Config.stepper.seekIncrementSteps);
   }
 }
 
@@ -421,6 +491,7 @@ void DoorController::handleClosedState()
     stateMachine.transitionTo(DoorState::Opening, "Sensor trigger");
     displayedSeekTopHint = false;
     stepper->enableOutputs();
+    startMotionWatch();
     stepper->moveTo(expectedDoorOpenPosition, false);
   }
 }
@@ -429,6 +500,12 @@ void DoorController::handleOpeningState()
 {
   if (!stepper)
   {
+    return;
+  }
+
+  if (motionLimitExceeded())
+  {
+    enterFault("Opening limit exceeded");
     return;
   }
 
@@ -481,6 +558,7 @@ void DoorController::handleOpenState()
       }
       stepper->enableOutputs();
       stateMachine.transitionTo(DoorState::Closing, "Hold period expired");
+      startMotionWatch();
       displayedSeekBottomHint = false;
       stepper->moveTo(Config.stepper.expectedClosePosition, false);
       openStateFirstEntry = true;
@@ -492,6 +570,12 @@ void DoorController::handleClosingState()
 {
   if (!stepper)
   {
+    return;
+  }
+
+  if (motionLimitExceeded())
+  {
+    enterFault("Closing limit exceeded");
     return;
   }
 
@@ -522,6 +606,7 @@ void DoorController::handleClosingState()
     displayedSeekTopHint = false;
     openStateFirstEntry = true;
     stepper->enableOutputs();
+    startMotionWatch();
     stepper->moveTo(expectedDoorOpenPosition, false);
     return;
   }
@@ -587,6 +672,41 @@ void DoorController::seekLimitSwitch(int direction, int steps)
     return;
   }
   stepper->move(direction * steps, false);
+}
+
+void DoorController::startMotionWatch()
+{
+  motionStartedMs = millis();
+  motionStartedPosition = stepper ? stepper->getCurrentPosition() : 0;
+}
+
+bool DoorController::motionLimitExceeded() const
+{
+  if (!stepper)
+  {
+    return true;
+  }
+  const int64_t travelled = static_cast<int64_t>(stepper->getCurrentPosition()) - motionStartedPosition;
+  const int64_t magnitude = travelled < 0 ? -travelled : travelled;
+  return magnitude >= Config.stepper.maximumTravelSteps ||
+         millis() - motionStartedMs >= Config.stepper.maximumMotionMs;
+}
+
+void DoorController::enterFault(const char *reason)
+{
+  openDoor = false;
+  if (stepper)
+  {
+    const int32_t position = stepper->getCurrentPosition();
+    stepper->forceStopAndNewPosition(position);
+    stepper->disableOutputs();
+  }
+  stateMachine.transitionTo(DoorState::Fault, reason);
+  if (displayService)
+  {
+    displayService->showStatus(reason ? reason : "Door fault", true);
+  }
+  SERIAL_PRINT("FAULT: %s\n", reason ? reason : "Door fault");
 }
 
 void DoorController::setPixelColor(uint8_t r, uint8_t g, uint8_t b)

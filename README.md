@@ -58,8 +58,8 @@ This is based on my earlier [Particle Photon DogDoor](https://github.com/shortbl
 
 ### Configuration
 
-1. Copy `src/Secrets example.h` to `src/Secrets.h` and fill in Wi-Fi, OTA, and
-   MQTT credentials.
+1. Create the ignored `src/Secrets.h` with the required Wi-Fi, OTA, and MQTT
+   definitions used by `ConnectivityManager.cpp` and `mqtt.cpp`.
 2. Adjust hardware constants in `src/Config.h` if your wiring deviates from the
    defaults (pins, debounce timings, trigger thresholds, etc.).
 3. (Optional) Toggle `Config.tof.enableDebugDisplay` to show sensor distances on
@@ -78,19 +78,20 @@ pio run -t upload
 pio device monitor
 ```
 
-An `esp32_ota` environment exists for OTA uploads; update `platformio.ini` with
-your device’s IP/OTA password before using `pio run -e esp32_ota -t upload`.
+An `esp32_ota` environment exists for OTA uploads. Create an ignored
+`private.ini` containing an `[env:esp32_ota]` section with `upload_port` set to
+the device's `.local` mDNS hostname and `upload_flags` containing its OTA
+password before running `pio run -e esp32_ota -t upload`.
 
 ### Versioning
 
-- Each build runs `scripts/generate_version_file.py`, which increments the
-  firmware patch number (starting at `1.0.0`), stamps the current UTC date, and
-  writes the values into `src/Version.h` (kept out of Git).
+- Each build runs `scripts/generate_version_file.py`, which reads the stable
+  `custom_firmware_version` value from `platformio.ini`, stamps the current UTC
+  date and Git metadata, and writes `src/Version.h` (kept out of Git).
 - The latest version, build date, and git hash appear in the serial diagnostics
   output and the MQTT device metadata (`sw_version`) so Home Assistant and other
   clients see the same information.
-- The counter lives in `.pio/version_state.json`; delete that file if you ever
-  want to reset the local version sequence.
+- Update `custom_firmware_version` deliberately when preparing a release.
 
 ### MQTT & Home Assistant
 

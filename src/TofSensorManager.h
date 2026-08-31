@@ -61,4 +61,5 @@ private:
   unsigned long nextReinitAttemptMs = 0;
   bool sensorInitNeeded = false;
   uint8_t lastSensorTriggered = 0;
+  size_t nextSensorToPoll = 0;
 };

@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include <functional>
+#include <utility>
 
 // Lightweight state machine wrapper that centralises transitions and allows
 // observers to audit them.

@@ -67,9 +67,13 @@ private:
 
   // State machine handlers
   void handleClosedState();
+  void handleHomingState();
   void handleOpeningState();
   void handleOpenState();
   void handleClosingState();
+  void enterFault(const char *reason);
+  void startMotionWatch();
+  bool motionLimitExceeded() const;
 
   void seekLimitSwitch(int direction, int steps);
 
@@ -97,6 +101,9 @@ private:
   std::array<int8_t, LimitSwitchConfig::count> lastLimitSwitchState{{-1, -1}};
   uint8_t lastSensorTriggeredClosedOrClosing = 0;
   uint32_t doorOpenCount = 0;
+  unsigned long motionStartedMs = 0;
+  int32_t motionStartedPosition = 0;
+  bool overrideConflict = false;
 
   void setPixelColor(uint8_t r, uint8_t g, uint8_t b);
 };

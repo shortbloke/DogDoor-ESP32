@@ -7,5 +7,10 @@
 .vscode/extensions.json
 .DS_Store
 Secrets.h
+src/Secrets example.h
 private.ini
+private.ini.example
 src/Version.h
+compile_commands.json
+$PROJECT_SRC_DIR/
+__pycache__/
