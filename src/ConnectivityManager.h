@@ -4,12 +4,12 @@
 #include <WiFi.h>
 
 class DoorController;
-class Adafruit_SSD1306;
+class DisplayService;
 
 // Coordinates WiFi connection retries and OTA initialisation without blocking loop().
 class ConnectivityManager {
 public:
-  void begin(DoorController *doorController, Adafruit_SSD1306 *displayPtr);
+  void begin(DoorController *doorController, DisplayService *displayService);
   void loop();
   bool isConnected() const { return wifiConnected; }
 
@@ -27,7 +27,7 @@ private:
   static const char *statusDescription(wl_status_t status);
 
   DoorController *door = nullptr;
-  Adafruit_SSD1306 *display = nullptr;
+  DisplayService *display = nullptr;
 
   unsigned long lastAttemptMs = 0;
   unsigned long retryStartMs = 0;

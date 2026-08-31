@@ -5,18 +5,21 @@
 #include <cstdint>
 #include "Config.h"
 #include "DoorStateMachine.h"
+#include "DoorTelemetryProvider.h"
 #include "TofSensorManager.h"
 
-// Forward declaration for UMS3
-class UMS3;
 class DisplayService;
+class StatusPixel;
 
 // Controls the automated dog door hardware and logic.
-class DoorController
+class DoorController : public DoorTelemetryProvider
 {
 public:
-  DoorController();
-  ~DoorController();
+  DoorController(StatusPixel &pixel, DisplayService &display, TofSensorManager &sensors);
+
+  // Energize the motor as early as possible so an elevated door cannot fall
+  // while the remaining hardware and network services initialize.
+  void beginMotorHold();
 
   // Initialize all hardware and sensors.
   void setup();
@@ -24,24 +27,21 @@ public:
   // Main loop: updates sensors, debounces switches, and runs state machine.
   void loop();
 
-  void setUMS3(UMS3 *ums3Ptr);
-  void setDisplayService(DisplayService *service);
-  void setTofSensorManager(TofSensorManager *manager);
-
   const char *getStateString() const;
-  float getDistanceIndoorCm() const;
-  float getDistanceOutdoorCm() const;
-  DoorState getCurrentState() const;
+  const char *getDoorStateString() const override { return getStateString(); }
+  float getDistanceIndoorCm() const override;
+  float getDistanceOutdoorCm() const override;
   bool isWiFiConnected() const { return wifiConnected; }
+  bool isFaultMotorHolding() const { return faultMotorHolding; }
 
-  uint32_t getDoorOpenCount() const;
+  uint32_t getDoorOpenCount() const override;
   void refreshStateDisplay();
 
   // Returns debounced state of the given limit switch.
-  bool isLimitSwitchPressed(LimitSwitch sw);
+  bool isLimitSwitchPressed(LimitSwitch sw) override;
   bool isLimitSwitchPressedRaw(LimitSwitch sw) const;
 
-  uint8_t getLastSensorTriggered() const;
+  uint8_t getLastSensorTriggered() const override;
 
   // Update WiFi connection status for display
   void setWiFiConnected(bool connected);
@@ -53,7 +53,7 @@ private:
   bool wifiConnected = false;
 
   // Hardware setup helpers
-  void setupStepper();
+  bool setupStepper();
   void setupLimitSwitches();
 
   // Sensor and state helpers
@@ -64,14 +64,19 @@ private:
   void handleStateTransition(DoorState from, DoorState to, const char *reason);
   void publishDistanceForSensor(uint8_t triggerId);
   void recordClosedOrClosingTrigger(uint8_t triggerId);
+  float distanceCmForSensor(size_t index) const;
 
   // State machine handlers
-  void handleClosedState();
   void handleHomingState();
+  void handleClosedState();
   void handleOpeningState();
   void handleOpenState();
   void handleClosingState();
   void enterFault(const char *reason);
+  bool startHoming();
+  bool startOpening(const char *reason);
+  bool startClosing(const char *reason);
+  void stopAtLimit(LimitSwitch limit);
   void startMotionWatch();
   bool motionLimitExceeded() const;
 
@@ -88,22 +93,22 @@ private:
   bool openDoor = false;
   bool keepClosed = false;
   bool keepOpen = false;
-  bool fastClosing = false;
   bool displayedSeekTopHint = false;
   bool displayedSeekBottomHint = false;
   DoorStateMachine stateMachine;
   int32_t expectedDoorOpenPosition = 100000; // Updated at runtime based on limit switches
-  UMS3 *ums3 = nullptr;
-  DisplayService *displayService = nullptr;
-  TofSensorManager *tofSensors = nullptr;
+  StatusPixel &statusPixel;
+  DisplayService &displayService;
+  TofSensorManager &tofSensors;
   unsigned long openStateEnteredMs = 0;
-  bool openStateFirstEntry = true;
+  const char *faultReason = nullptr;
   std::array<int8_t, LimitSwitchConfig::count> lastLimitSwitchState{{-1, -1}};
   uint8_t lastSensorTriggeredClosedOrClosing = 0;
   uint32_t doorOpenCount = 0;
   unsigned long motionStartedMs = 0;
   int32_t motionStartedPosition = 0;
   bool overrideConflict = false;
+  bool motorHoldInitialized = false;
+  bool faultMotorHolding = false;
 
-  void setPixelColor(uint8_t r, uint8_t g, uint8_t b);
 };

@@ -13,6 +13,12 @@ This is based on my earlier [Particle Photon DogDoor](https://github.com/shortbl
 - **Sensor-aware door control** – polls indoor/outdoor VL53L0X sensors,
   debounces limit switches, and coordinates a FastAccelStepper-driven door state
   machine.
+- **Controlled startup homing** – when position is unknown, moves slowly toward
+  the bottom limit with bounded travel and timeout protection.
+- **Early startup hold** – energizes the stepper before display, sensor, and
+  network initialization to resist gravity while door position is established.
+- **Fail-safe fault hold** – immediately stops commanded motion while retaining
+  motor torque so an elevated door does not fall after a software fault.
 - **Connectivity services** – Wi-Fi bring-up with OTA support, MQTT publishing,
   Home Assistant discovery payloads, and live display of connection state.
 - **OLED UX** – Wi-Fi/MQTT icons, trigger indicators, status text, and live
@@ -27,19 +33,20 @@ This is based on my earlier [Particle Photon DogDoor](https://github.com/shortbl
 ```text
 ├── src/
 │   ├── AppContainer.cpp/h        # AppContainer ownership graph and lifecycle hooks
-│   ├── Config.cpp/h              # ConfigData defaults, persistent structs, pin maps
+│   ├── Config.cpp/h              # Configuration defaults and hardware pin maps
 │   ├── ConnectivityManager.cpp/h # Wi-Fi, OTA, and status propagation interface
 │   ├── DiagnosticsService.cpp/h  # Serial diagnostics command handling
-│   ├── DisplayHelpers.cpp/h      # OLED drawing helper implementations and APIs
 │   ├── DisplayService.cpp/h      # Display service logic, fonts, and interface
 │   ├── DoorController.cpp/h      # Door controller orchestration and collaborators
 │   ├── DoorStateMachine.cpp/h    # Door state transitions and event dispatch
-│   ├── DoorTelemetryProvider.h   # Shared telemetry payload structures
+│   ├── DoorTelemetryProvider.h   # Read-only MQTT telemetry interface
 │   ├── IconBitmaps.h             # Bitmap assets for status icons
 │   ├── mqtt.cpp/h                # MQTT topics, payload builders, and interface
+│   ├── StatusPixel.cpp/h         # Onboard RGB status pixel control
 │   ├── TofSensorManager.cpp/h    # VL53L0X manager coordination and sensor structs
-│   ├── main.cpp                  # Arduino entry point delegating to AppContainer
-│   └── Secrets example.h         # Template for Wi-Fi/MQTT credentials
+│   └── main.cpp                  # Arduino entry point delegating to AppContainer
+├── scripts/                     # Build-time version header generation
+├── test/                        # Native state-machine tests
 ├── platformio.ini               # PlatformIO environments
 └── README.md
 ```
@@ -64,6 +71,15 @@ This is based on my earlier [Particle Photon DogDoor](https://github.com/shortbl
    defaults (pins, debounce timings, trigger thresholds, etc.).
 3. (Optional) Toggle `Config.tof.enableDebugDisplay` to show sensor distances on
    the OLED during operation.
+
+The bottom limit switch must actuate before the door reaches its physical hard
+stop. Leave enough mechanical margin for the motor to stop; firmware checks the
+raw switch before other loop work but cannot compensate for a switch mounted at
+or beyond the hard stop.
+
+The early motor hold only applies after firmware begins executing. Preventing a
+fall during power loss, reset, or flashing requires mechanical support such as a
+normally engaged brake, self-locking drive, or counterbalance.
 
 ### Build & Upload
 
@@ -119,8 +135,8 @@ limit switch readings, and TOF ranges/health.
 - **AppContainer** wires together the display service, TOF manager, door
   controller, connectivity manager, MQTT client, and diagnostics so that `main`
   simply calls `begin()`/`loop()`.
-- **DisplayService** removes global state by wrapping OLED access in an
-  injectable service; `DisplayHelpers` now simply forwards to this service.
+- **DisplayService** wraps OLED access in a service passed directly to the
+  components that render connectivity and door status.
 - **TofSensorManager** encapsulates VL53L0X lifecycle management (sequential
   init, continuous reads, back-off retries) and exposes sensor health snapshots.
 - **DoorStateMachine** provides an auditable transition callback so door state

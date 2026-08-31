@@ -1,5 +1,4 @@
 #include "AppContainer.h"
-#include "DisplayHelpers.h"
 #include "mqtt.h"
 #include <ArduinoOTA.h>
 #include <Wire.h>
@@ -7,24 +6,21 @@
 AppContainer::AppContainer()
     : display(kScreenWidth, kScreenHeight, &Wire),
       tofSensors(&displayService),
-      telemetry(door)
+      door(statusPixel, displayService, tofSensors)
 {
 }
 
 void AppContainer::begin()
 {
-  door.setUMS3(&ums3);
-  door.setDisplayService(&displayService);
-  door.setTofSensorManager(&tofSensors);
+  // This must remain the first hardware action: hold the door against gravity
+  // before display, sensor, Wi-Fi, MQTT, or OTA initialization can delay it.
+  door.beginMotorHold();
 
-  ums3.begin();
-  ums3.setPixelBrightness(kPixelBrightness);
-  ums3.setPixelPower(true);
+  statusPixel.begin();
 
   if (display.begin(SSD1306_SWITCHCAPVCC, kScreenAddress))
   {
     displayService.attach(&display);
-    DisplayHelpers::setService(&displayService);
     displayService.setWiFiConnected(false);
     displayService.setMQTTConnected(false);
     displayService.setLastSensorTriggered(0);
@@ -35,24 +31,25 @@ void AppContainer::begin()
     Serial.println("OLED initialization failed; continuing without display");
   }
 
-  ums3.setPixelColor(255, 255, 0); // Yellow during WiFi connection
-  connectivity.begin(&door, &display);
+  statusPixel.setColor(255, 255, 0); // Yellow during WiFi connection
+  connectivity.begin(&door, &displayService);
 
-  ums3.setPixelColor(255, 0, 0);
+  statusPixel.setColor(255, 0, 0);
   door.setup();
 
-  mqttSetup(&telemetry);  // MQTT client initialisation (connection handled in loop)
+  mqttSetup(&door, &displayService);  // connection handled in loop
 
-  ums3.setPixelColor(0, 255, 0);
+  statusPixel.setColor(0, 255, 0);
 
   diagnostics.begin(&door, &tofSensors, &connectivity);
 }
 
 void AppContainer::loop()
 {
+  // Door motion and raw limit switches take priority over network services.
+  door.loop();
   connectivity.loop();
   ArduinoOTA.handle();
-  door.loop();
   mqttLoop();
   diagnostics.loop();
 }

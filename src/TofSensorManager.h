@@ -18,24 +18,18 @@ public:
     bool anySensorQualified = false;
     bool triggerEvent = false;
     uint8_t triggerSensorId = 0; // 0 = none, 1 = indoor, 2 = outdoor
-    std::array<uint16_t, kSensorCount> rangesMm{};
   };
 
   using StatusPublisher = std::function<void(uint8_t sensorIndex, bool ok, bool reportInitEvent)>;
 
   explicit TofSensorManager(DisplayService *displayService = nullptr);
 
-  void setDisplayService(DisplayService *service);
   void setStatusPublisher(StatusPublisher publisher);
 
   bool begin(bool allowRetry = true);
   UpdateResult update();
 
   float distanceCm(size_t index) const;
-  uint8_t lastTriggerId() const { return lastSensorTriggered; }
-
-  void requestReinitialisation();
-
   const std::array<uint16_t, kSensorCount>& rangesMm() const { return ranges; }
   const std::array<bool, kSensorCount>& readyFlags() const { return sensorReady; }
   const std::array<bool, kSensorCount>& measurementFlags() const { return measurementOk; }
@@ -44,6 +38,7 @@ private:
   bool initialiseSensors(bool isReinit);
   void configureSensor(VL53L0X &sensor, size_t index);
   void publishSensorStatus(uint8_t sensorIndex, bool ok, bool reportInitEvent);
+  void resetMeasurementState(size_t index);
   uint16_t reportedDistanceMm(size_t index) const;
 
   DisplayService *display = nullptr;
@@ -60,6 +55,5 @@ private:
   unsigned long lastSensorInitMs = 0;
   unsigned long nextReinitAttemptMs = 0;
   bool sensorInitNeeded = false;
-  uint8_t lastSensorTriggered = 0;
   size_t nextSensorToPoll = 0;
 };

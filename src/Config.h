@@ -45,10 +45,14 @@ struct StepperConfig
   bool enableActiveLow = true;
   int32_t stepsPerSecond = 17500;
   int32_t acceleration = 17500;
+  int32_t homingStepsPerSecond = 1000;
+  int32_t homingAcceleration = 1000;
   int32_t expectedClosePosition = 0;
   int32_t seekIncrementSteps = 100;
   int32_t maximumTravelSteps = 120000;
   unsigned long maximumMotionMs = 15000;
+  // Allows the full 120,000-step safety travel at the reduced homing speed.
+  unsigned long maximumHomingMs = 130000;
 };
 
 struct TimingConfig
@@ -57,7 +61,6 @@ struct TimingConfig
   unsigned long sensorReinitIntervalMs = 5UL * 60UL * 1000UL;
   unsigned long sensorStatusGracePeriodMs = 250;
   int sensorInitDelayMs = 10;
-  int setupDelayMs = 2000;
 };
 
 struct MiscConfig

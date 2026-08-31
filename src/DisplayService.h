@@ -12,8 +12,6 @@ public:
   DisplayService() = default;
 
   void attach(Adafruit_SSD1306 *displayPtr);
-  Adafruit_SSD1306 *display() const { return oled; }
-
   void setWiFiConnected(bool connected);
   void setMQTTConnected(bool connected);
   void setLastSensorTriggered(uint8_t sensorId);

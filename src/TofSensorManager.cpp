@@ -17,11 +17,6 @@ bool deadlineReached(unsigned long now, unsigned long deadline)
 TofSensorManager::TofSensorManager(DisplayService *displayService)
     : display(displayService) {}
 
-void TofSensorManager::setDisplayService(DisplayService *service)
-{
-  display = service;
-}
-
 void TofSensorManager::setStatusPublisher(StatusPublisher publisher)
 {
   statusPublisher = std::move(publisher);
@@ -38,14 +33,11 @@ bool TofSensorManager::begin(bool allowRetry)
     return false;
   }
 
-  if (allowRetry)
+  sensorInitNeeded = true;
+  nextReinitAttemptMs = millis() + kReinitBackoffMs;
+  if (display)
   {
-    sensorInitNeeded = true;
-    nextReinitAttemptMs = millis() + kReinitBackoffMs;
-    if (display)
-    {
-      display->showStatus("VL53L0X retry pending", true);
-    }
+    display->showStatus("VL53L0X retry pending", true);
   }
   return false;
 }
@@ -54,7 +46,6 @@ TofSensorManager::UpdateResult TofSensorManager::update()
 {
   UpdateResult result;
   unsigned long now = millis();
-  result.rangesMm = ranges;
 
   if (!sensorInitNeeded && (now - lastSensorInitMs >= Config.timing.sensorReinitIntervalMs))
   {
@@ -62,116 +53,70 @@ TofSensorManager::UpdateResult TofSensorManager::update()
     nextReinitAttemptMs = now;
   }
 
-  for (size_t i = 0; i < kSensorCount; ++i)
+  const size_t i = nextSensorToPoll;
+  const bool withinGrace = !deadlineReached(now, sensorStatusSuppressUntil[i]);
+  auto &sensor = sensors[i];
+  measurementOk[i] = false;
+
+  if (!sensorReady[i])
   {
-    if (i != nextSensorToPoll)
+    if (!withinGrace)
     {
-      continue;
+      publishSensorStatus(static_cast<uint8_t>(i), false, false);
     }
-    bool withinGrace = !deadlineReached(now, sensorStatusSuppressUntil[i]);
-    auto &sensor = sensors[i];
-    measurementOk[i] = false;
-
-    if (!sensorReady[i])
-    {
-      if (!withinGrace)
-      {
-        publishSensorStatus(static_cast<uint8_t>(i), false, false);
-      }
-      continue;
-    }
-
-    uint16_t reading = sensor.readRangeContinuousMillimeters();
+  }
+  else
+  {
+    const uint16_t reading = sensor.readRangeContinuousMillimeters();
     const bool timedOut = sensor.timeoutOccurred();
+    const bool invalid = timedOut || sensor.last_status != 0 ||
+                         reading == 0 || reading == Config.tof.errorValue;
     ranges[i] = reading;
-    result.rangesMm[i] = reading;
 
     if (withinGrace)
     {
-      sensorBelowThreshold[i] = false;
-      sensorBelowStreak[i] = 0;
-      measurementOk[i] = !timedOut && sensor.last_status == 0 &&
-                         reading != 0 && reading != Config.tof.errorValue;
-      if (measurementOk[i])
+      resetMeasurementState(i);
+      measurementOk[i] = !invalid;
+      if (!invalid)
       {
         publishSensorStatus(static_cast<uint8_t>(i), true, false);
       }
-      continue;
     }
-
-    if (timedOut)
+    else if (invalid)
     {
       publishSensorStatus(static_cast<uint8_t>(i), false, false);
-      sensorBelowThreshold[i] = false;
-      sensorBelowStreak[i] = 0;
-      continue;
-    }
-
-    if (sensor.last_status != 0)
-    {
-      publishSensorStatus(static_cast<uint8_t>(i), false, false);
-      sensorBelowThreshold[i] = false;
-      sensorBelowStreak[i] = 0;
-      continue;
-    }
-
-    if (reading == 0)
-    {
-      publishSensorStatus(static_cast<uint8_t>(i), false, false);
-      sensorBelowThreshold[i] = false;
-      sensorBelowStreak[i] = 0;
-      continue;
-    }
-
-    if (reading == Config.tof.errorValue)
-    {
-      publishSensorStatus(static_cast<uint8_t>(i), false, false);
-      sensorInitNeeded = true;
-      sensorReady[i] = false;
-      sensorBelowThreshold[i] = false;
-      sensorBelowStreak[i] = 0;
-      sensorStatusSuppressUntil[i] = millis() + Config.timing.sensorStatusGracePeriodMs;
-      continue;
-    }
-
-    publishSensorStatus(static_cast<uint8_t>(i), true, false);
-    measurementOk[i] = true;
-
-    if (reading > Config.tof.maxConsideredDistanceMm)
-    {
-      sensorBelowThreshold[i] = false;
-      sensorBelowStreak[i] = 0;
-      continue;
-    }
-
-    bool below = reading < Config.tof.rangeThresholdMm[i];
-    if (below)
-    {
-      uint8_t &streak = sensorBelowStreak[i];
-      if (streak < Config.tof.consecutiveReadingsForTrigger)
+      resetMeasurementState(i);
+      if (reading == Config.tof.errorValue)
       {
-        ++streak;
-      }
-
-      if (streak >= Config.tof.consecutiveReadingsForTrigger)
-      {
-        result.anySensorQualified = true;
-        if (!sensorBelowThreshold[i])
-        {
-          result.triggerEvent = true;
-          result.triggerSensorId = (i == 0) ? 1 : 2;
-          sensorBelowThreshold[i] = true;
-        }
-      }
-      else
-      {
-        sensorBelowThreshold[i] = false;
+        sensorInitNeeded = true;
+        sensorReady[i] = false;
+        sensorStatusSuppressUntil[i] = millis() + Config.timing.sensorStatusGracePeriodMs;
       }
     }
     else
     {
-      sensorBelowThreshold[i] = false;
-      sensorBelowStreak[i] = 0;
+      publishSensorStatus(static_cast<uint8_t>(i), true, false);
+      measurementOk[i] = true;
+      const bool below = reading <= Config.tof.maxConsideredDistanceMm &&
+                         reading < Config.tof.rangeThresholdMm[i];
+      if (!below)
+      {
+        resetMeasurementState(i);
+      }
+      else
+      {
+        uint8_t &streak = sensorBelowStreak[i];
+        if (streak < Config.tof.consecutiveReadingsForTrigger)
+        {
+          ++streak;
+        }
+        if (streak >= Config.tof.consecutiveReadingsForTrigger && !sensorBelowThreshold[i])
+        {
+          sensorBelowThreshold[i] = true;
+          result.triggerEvent = true;
+          result.triggerSensorId = static_cast<uint8_t>(i + 1);
+        }
+      }
     }
   }
 
@@ -180,11 +125,6 @@ TofSensorManager::UpdateResult TofSensorManager::update()
   for (bool qualified : sensorBelowThreshold)
   {
     result.anySensorQualified = result.anySensorQualified || qualified;
-  }
-
-  if (result.triggerEvent)
-  {
-    lastSensorTriggered = result.triggerSensorId;
   }
 
   now = millis();
@@ -273,12 +213,6 @@ float TofSensorManager::distanceCm(size_t index) const
   return mm / 10.0f;
 }
 
-void TofSensorManager::requestReinitialisation()
-{
-  sensorInitNeeded = true;
-  nextReinitAttemptMs = millis();
-}
-
 bool TofSensorManager::initialiseSensors(bool isReinit)
 {
   Wire.begin(Config.tof.sdaPin, Config.tof.sclPin, 400000);
@@ -292,8 +226,7 @@ bool TofSensorManager::initialiseSensors(bool isReinit)
     pinMode(Config.tof.xshutPins[i], OUTPUT);
     digitalWrite(Config.tof.xshutPins[i], LOW);
     sensorReady[i] = false;
-    sensorBelowThreshold[i] = false;
-    sensorBelowStreak[i] = 0;
+    resetMeasurementState(i);
     ranges[i] = 0;
     sensorStatusSuppressUntil[i] = millis() + Config.timing.sensorStatusGracePeriodMs;
     measurementOk[i] = false;
@@ -338,8 +271,7 @@ bool TofSensorManager::initialiseSensors(bool isReinit)
     sensor.startContinuous();
 
     sensorReady[i] = true;
-    sensorBelowThreshold[i] = false;
-    sensorBelowStreak[i] = 0;
+    resetMeasurementState(i);
     ranges[i] = 0;
     sensorStatusSuppressUntil[i] = millis() + Config.timing.sensorStatusGracePeriodMs;
     measurementOk[i] = false;
@@ -380,4 +312,10 @@ void TofSensorManager::publishSensorStatus(uint8_t sensorIndex, bool ok, bool re
   {
     statusPublisher(sensorIndex, ok, reportInitEvent);
   }
+}
+
+void TofSensorManager::resetMeasurementState(size_t index)
+{
+  sensorBelowThreshold[index] = false;
+  sensorBelowStreak[index] = 0;
 }

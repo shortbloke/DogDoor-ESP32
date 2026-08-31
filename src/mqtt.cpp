@@ -9,7 +9,7 @@
 #include <limits>
 #include <pgmspace.h>
 #include "Secrets.h"
-#include "DisplayHelpers.h"
+#include "DisplayService.h"
 #include "Version.h"
 
 // Serial debug print macro matches DoorController.cpp usage.
@@ -52,6 +52,7 @@ constexpr char kDiscoveryDoorOpenCountConfig[] = "homeassistant/sensor/dogdoor/d
 static WiFiClient wifiClient;
 static PubSubClient mqttClient(wifiClient);
 static DoorTelemetryProvider *telemetry = nullptr;
+static DisplayService *display = nullptr;
 
 static bool discoveryPublished = false;
 static String lastDoorState = "";
@@ -309,6 +310,9 @@ static void ensureDiscoveryPayloads() {
 
 // ---------- Helpers ----------
 static bool publishRetained(const char* topic, const char* payload) {
+  if (!mqttClient.connected()) {
+    return false;
+  }
   if (!mqttClient.publish(topic, payload, true)) {
     SERIAL_PRINT("[MQTT] Publish failed (%s) len=%u\n", topic, static_cast<unsigned>(std::strlen(payload)));
     return false;
@@ -381,7 +385,7 @@ static void publishTofInitCount(size_t sensorIndex) {
   }
   char buffer[12];
   snprintf(buffer, sizeof(buffer), "%lu", static_cast<unsigned long>(tofInitCounters[sensorIndex]));
-  if (mqttClient.publish(tofInitTopics[sensorIndex].c_str(), buffer, true)) {
+  if (publishRetained(tofInitTopics[sensorIndex].c_str(), buffer)) {
     tofInitPublished[sensorIndex] = tofInitCounters[sensorIndex];
   } else {
     SERIAL_PRINT("[MQTT] Publish failed (%s)\n", tofInitTopics[sensorIndex].c_str());
@@ -390,7 +394,7 @@ static void publishTofInitCount(size_t sensorIndex) {
 
 static const char* normalizeDoorState(const char* raw) {
   // Expecting "OPEN"/"CLOSED" ideally. Map anything else.
-  if (!raw) return "UNKNOWN";
+  if (!raw) return "CLOSED";
   String s = raw;
   s.toUpperCase();
   if (s.indexOf("OPEN") >= 0) return "OPEN";
@@ -399,29 +403,25 @@ static const char* normalizeDoorState(const char* raw) {
 }
 
 void mqttPublishDoorState(const char* state) {
-  if (!mqttClient.connected()) return;
-
   const char* normalized = normalizeDoorState(state);
   const char* raw = state ? state : "UNKNOWN";
 
-  mqttClient.publish(kTopicDoorState, normalized, true);
-  mqttClient.publish(kTopicDoorStateActual, raw, true);
+  publishRetained(kTopicDoorState, normalized);
+  publishRetained(kTopicDoorStateActual, raw);
 }
 
 static void mqttPublishFloat(const char* topic, float value) {
-  if (!mqttClient.connected()) return;
   if (value < 0) return;
   char buf[16];
   dtostrf(value, 1, 2, buf);
-  mqttClient.publish(topic, buf, true);
+  publishRetained(topic, buf);
 }
 
 void mqttPublishDistanceIndoor(float cm)  { mqttPublishFloat(kTopicDistanceIndoor, cm); }
 void mqttPublishDistanceOutdoor(float cm) { mqttPublishFloat(kTopicDistanceOutdoor, cm); }
 
 static void mqttPublishLimit(const char* topic, bool pressed) {
-  if (!mqttClient.connected()) return;
-  mqttClient.publish(topic, pressed ? "ON" : "OFF", true);
+  publishRetained(topic, pressed ? "ON" : "OFF");
 }
 
 void mqttPublishLimitSwitchTop(bool pressed) {
@@ -433,18 +433,16 @@ void mqttPublishLimitSwitchBottom(bool pressed) {
 }
 
 void mqttPublishSensorTrigger(uint8_t triggerId) {
-  if (!mqttClient.connected()) return;
   const char* payload = "NONE";
   if (triggerId == 1) payload = "INDOOR";
   else if (triggerId == 2) payload = "OUTDOOR";
-  mqttClient.publish(kTopicSensorTrigger, payload, true);
+  publishRetained(kTopicSensorTrigger, payload);
 }
 
 void mqttPublishDoorOpenCount(uint32_t count) {
-  if (!mqttClient.connected()) return;
   char buffer[16];
   snprintf(buffer, sizeof(buffer), "%lu", static_cast<unsigned long>(count));
-  mqttClient.publish(kTopicDoorOpenCount, buffer, true);
+  publishRetained(kTopicDoorOpenCount, buffer);
 }
 
 void mqttPublishTOFSensorStatus(uint8_t sensorIndex, bool measurementOk) {
@@ -465,7 +463,7 @@ void mqttPublishTOFSensorStatus(uint8_t sensorIndex, bool measurementOk) {
   }
 
   const char* payload = measurementOk ? kTofStatusPayloadOk : kTofStatusPayloadError;
-  if (mqttClient.publish(tofStatusTopics[sensorIndex].c_str(), payload, true)) {
+  if (publishRetained(tofStatusTopics[sensorIndex].c_str(), payload)) {
     tofStatusPublished[sensorIndex] = latest;
   } else {
     SERIAL_PRINT("[MQTT] Publish failed (%s)\n", tofStatusTopics[sensorIndex].c_str());
@@ -550,8 +548,10 @@ static void mqttReconnect() {
       )) {
     SERIAL_PRINT("[MQTT] Connected\n");
     // Mark online (retain)
-    mqttClient.publish(kTopicAvailability, "online", true);
-    DisplayHelpers::setMQTTConnected(true);
+    publishRetained(kTopicAvailability, "online");
+    if (display) {
+      display->setMQTTConnected(true);
+    }
 
     if (!discoveryPublished) {
       publishDiscovery();
@@ -604,11 +604,12 @@ static void mqttReconnect() {
 }
 
 // ---------- Public API ----------
-void mqttSetup(DoorTelemetryProvider *provider) {
+void mqttSetup(DoorTelemetryProvider *provider, DisplayService *displayService) {
   ensureTofTopicsInitialized();
   resetTofStatusCaches();
   discoveryPayloads.initialised = false;
   telemetry = provider;
+  display = displayService;
   discoveryPublished = false;
   lastDoorState = "";
   lastSensorTriggerPublished = telemetry ? telemetry->getLastSensorTriggered() : 0;
@@ -622,7 +623,9 @@ void mqttSetup(DoorTelemetryProvider *provider) {
 
 void mqttLoop() {
   if (!mqttClient.connected()) {
-    DisplayHelpers::setMQTTConnected(false);
+    if (display) {
+      display->setMQTTConnected(false);
+    }
     mqttReconnect();
   }
   mqttClient.loop();

@@ -20,12 +20,12 @@ void test_transition_records_previous_state_and_reason()
     observedReason = reason;
   });
 
-  TEST_ASSERT_TRUE(machine.transitionTo(DoorState::Homing, "startup"));
+  TEST_ASSERT_TRUE(machine.transitionTo(DoorState::Opening, "sensor"));
   TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Closed), static_cast<int>(machine.previous()));
-  TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Homing), static_cast<int>(machine.current()));
+  TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Opening), static_cast<int>(machine.current()));
   TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Closed), static_cast<int>(observedFrom));
-  TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Homing), static_cast<int>(observedTo));
-  TEST_ASSERT_EQUAL_STRING("startup", observedReason);
+  TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Opening), static_cast<int>(observedTo));
+  TEST_ASSERT_EQUAL_STRING("sensor", observedReason);
 }
 
 void test_duplicate_transition_is_ignored()

@@ -1,13 +1,13 @@
 #include "ConnectivityManager.h"
 #include <ArduinoOTA.h>
 #include "DoorController.h"
-#include "DisplayHelpers.h"
+#include "DisplayService.h"
 #include "Secrets.h"
 
-void ConnectivityManager::begin(DoorController *doorController, Adafruit_SSD1306 *displayPtr)
+void ConnectivityManager::begin(DoorController *doorController, DisplayService *displayService)
 {
   door = doorController;
-  display = displayPtr;
+  display = displayService;
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(false);
   startConnectCycle();
@@ -147,7 +147,10 @@ void ConnectivityManager::scheduleRetry()
 
 void ConnectivityManager::showStatus(const char *message, bool warning, int textSize)
 {
-  DisplayHelpers::showStatus(display, message, warning, textSize);
+  if (display)
+  {
+    display->showStatus(message, warning, textSize);
+  }
 }
 
 const char *ConnectivityManager::statusDescription(wl_status_t status)

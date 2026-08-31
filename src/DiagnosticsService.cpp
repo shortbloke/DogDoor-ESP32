@@ -88,6 +88,8 @@ void DiagnosticsService::printStatus() const
   const char *state = door->getStateString();
   Serial.print(F("Door state: "));
   Serial.println(state ? state : "UNKNOWN");
+  Serial.print(F("Fault motor hold: "));
+  Serial.println(door->isFaultMotorHolding() ? F("active") : F("inactive"));
 
   Serial.print(F("WiFi connected: "));
   bool wifiOk = connectivity ? connectivity->isConnected() : door->isWiFiConnected();

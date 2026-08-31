@@ -2,7 +2,9 @@
 #include <Arduino.h>
 #include "DoorTelemetryProvider.h"
 
-void mqttSetup(DoorTelemetryProvider *provider);
+class DisplayService;
+
+void mqttSetup(DoorTelemetryProvider *provider, DisplayService *displayService);
 void mqttLoop();
 
 void mqttPublishDoorState(const char* state);
