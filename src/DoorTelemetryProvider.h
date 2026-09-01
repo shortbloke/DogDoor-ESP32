@@ -13,4 +13,5 @@ public:
   virtual bool isLimitSwitchPressed(LimitSwitch sw) = 0;
   virtual uint8_t getLastSensorTriggered() const = 0;
   virtual uint32_t getDoorOpenCount() const = 0;
+  virtual uint32_t getSensorTriggerCount(size_t index) const = 0;
 };

@@ -97,6 +97,12 @@ void DiagnosticsService::printStatus() const
 
   Serial.print(F("Last trigger: "));
   Serial.println(door.getLastSensorTriggered());
+  Serial.print(F("Completed opening count: "));
+  Serial.println(door.getDoorOpenCount());
+  Serial.print(F("Indoor trigger count: "));
+  Serial.println(door.getSensorTriggerCount(0));
+  Serial.print(F("Outdoor trigger count: "));
+  Serial.println(door.getSensorTriggerCount(1));
 
   Serial.print(F("Indoor distance (cm): "));
   Serial.println(door.getDistanceIndoorCm(), 2);

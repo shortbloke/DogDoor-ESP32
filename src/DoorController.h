@@ -1,6 +1,7 @@
 #pragma once
 #include <Bounce2.h>
 #include <FastAccelStepper.h>
+#include <Preferences.h>
 #include <array>
 #include <cstdint>
 #include "Config.h"
@@ -36,6 +37,7 @@ public:
   bool isFaultMotorHolding() const { return faultMotorHolding; }
 
   uint32_t getDoorOpenCount() const override;
+  uint32_t getSensorTriggerCount(size_t index) const override;
   void refreshStateDisplay();
 
   // Returns debounced state of the given limit switch.
@@ -65,6 +67,10 @@ private:
   void handleStateTransition(DoorState from, DoorState to, const char *reason);
   void publishDistanceForSensor(uint8_t triggerId);
   void recordClosedOrClosingTrigger(uint8_t triggerId);
+  void recordSensorTrigger(uint8_t triggerId);
+  void loadPersistentCounters();
+  void persistCounter(const char *key, uint32_t value);
+  void persistCountersIfStationary();
   float distanceCmForSensor(size_t index) const;
 
   // State machine handlers
@@ -106,6 +112,11 @@ private:
   std::array<int8_t, LimitSwitchConfig::count> lastLimitSwitchState{{-1, -1}};
   uint8_t lastSensorTriggeredClosedOrClosing = 0;
   uint32_t doorOpenCount = 0;
+  std::array<uint32_t, TofSensorConfig::count> sensorTriggerCounts{{0, 0}};
+  std::array<bool, TofSensorConfig::count> sensorTriggerCountDirty{{false, false}};
+  bool doorOpenCountDirty = false;
+  Preferences preferences;
+  bool countersLoaded = false;
   unsigned long motionStartedMs = 0;
   int32_t motionStartedPosition = 0;
   bool overrideConflict = false;

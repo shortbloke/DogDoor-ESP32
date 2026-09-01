@@ -112,12 +112,15 @@ password before running `pio run -e esp32_ota -t upload`.
 
 ### MQTT & Home Assistant
 
-- The firmware publishes retained topics under the `dogdoor/` namespace (door
+- The firmware publishes retained topics under the `pet_door/` namespace (door
   state, distances, limit switches, sensor health, etc.).
+- Persistent lifetime counters distinguish completed opening cycles from indoor
+  and outdoor sensor-trigger events. Home Assistant can derive daily totals
+  from any of these monotonic counters without losing counts across restarts.
 - The binary door topic reports `CLOSED` only for a confirmed closed state;
   homing, movement, faults, and unknown states conservatively report `OPEN`.
 - Home Assistant discovery messages are automatically published when MQTT
-  connects; entities appear under the `dogdoor` node.
+  connects; entities appear under the `pet_door` node.
 
 Refer to `src/mqtt.cpp` if you want to adjust topics or payload structure.
 

@@ -34,6 +34,7 @@ void DoorController::beginMotorHold()
   }
 
   Serial.begin(Config.misc.serialBaudRate);
+  loadPersistentCounters();
   motorHoldInitialized = setupStepper();
   if (motorHoldInitialized)
   {
@@ -153,6 +154,7 @@ void DoorController::loop()
 
   checkOverrideSwitches();
   handleState();
+  persistCountersIfStationary();
 }
 
 const char *DoorController::getStateString() const
@@ -196,6 +198,11 @@ float DoorController::getDistanceOutdoorCm() const
 uint32_t DoorController::getDoorOpenCount() const
 {
   return doorOpenCount;
+}
+
+uint32_t DoorController::getSensorTriggerCount(size_t index) const
+{
+  return index < sensorTriggerCounts.size() ? sensorTriggerCounts[index] : 0;
 }
 
 uint8_t DoorController::getLastSensorTriggered() const
@@ -264,6 +271,7 @@ void DoorController::processSensorUpdate(const TofSensorManager::UpdateResult &u
   {
     uint8_t triggerId = update.triggerSensorId;
     publishDistanceForSensor(triggerId);
+    recordSensorTrigger(triggerId);
 
     if (doorClosedOrClosing)
     {
@@ -315,7 +323,68 @@ void DoorController::recordClosedOrClosingTrigger(uint8_t triggerId)
 {
   lastSensorTriggeredClosedOrClosing = triggerId;
   displayService.setLastSensorTriggered(triggerId);
+}
+
+void DoorController::recordSensorTrigger(uint8_t triggerId)
+{
+  if (triggerId == 0 || triggerId > sensorTriggerCounts.size())
+  {
+    return;
+  }
+
+  const size_t index = triggerId - 1;
+  ++sensorTriggerCounts[index];
+  sensorTriggerCountDirty[index] = true;
   mqttPublishSensorTrigger(triggerId);
+  mqttPublishSensorTriggerCount(index, sensorTriggerCounts[index]);
+}
+
+void DoorController::loadPersistentCounters()
+{
+  if (countersLoaded)
+  {
+    return;
+  }
+  countersLoaded = preferences.begin("dogdoor", false);
+  if (!countersLoaded)
+  {
+    SERIAL_PRINT("WARN: Persistent counters unavailable\n");
+    return;
+  }
+  doorOpenCount = preferences.getUInt("open_count", 0);
+  sensorTriggerCounts[0] = preferences.getUInt("indoor_count", 0);
+  sensorTriggerCounts[1] = preferences.getUInt("outdoor_count", 0);
+}
+
+void DoorController::persistCounter(const char *key, uint32_t value)
+{
+  if (countersLoaded && preferences.putUInt(key, value) == 0)
+  {
+    SERIAL_PRINT("WARN: Failed to persist counter %s\n", key);
+  }
+}
+
+void DoorController::persistCountersIfStationary()
+{
+  const DoorState state = stateMachine.current();
+  if (state != DoorState::Closed && state != DoorState::Open)
+  {
+    return;
+  }
+
+  if (doorOpenCountDirty)
+  {
+    persistCounter("open_count", doorOpenCount);
+    doorOpenCountDirty = false;
+  }
+  for (size_t i = 0; i < sensorTriggerCounts.size(); ++i)
+  {
+    if (sensorTriggerCountDirty[i])
+    {
+      persistCounter(i == 0 ? "indoor_count" : "outdoor_count", sensorTriggerCounts[i]);
+      sensorTriggerCountDirty[i] = false;
+    }
+  }
 }
 
 void DoorController::checkOverrideSwitches()
@@ -430,6 +499,7 @@ void DoorController::handleStateTransition(DoorState from, DoorState to, const c
   {
     openStateEnteredMs = millis();
     ++doorOpenCount;
+    doorOpenCountDirty = true;
     mqttPublishDoorOpenCount(doorOpenCount);
   }
 }

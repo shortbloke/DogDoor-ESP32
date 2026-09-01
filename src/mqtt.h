@@ -13,6 +13,7 @@ void mqttPublishDistanceOutdoor(float cm);
 void mqttPublishLimitSwitchTop(bool pressed);
 void mqttPublishLimitSwitchBottom(bool pressed);
 void mqttPublishSensorTrigger(uint8_t triggerId);
+void mqttPublishSensorTriggerCount(size_t sensorIndex, uint32_t count);
 void mqttPublishTOFSensorStatus(uint8_t sensorIndex, bool measurementOk);
 void mqttPublishTOFInit(uint8_t sensorIndex);
 void mqttPublishDoorOpenCount(uint32_t count);
