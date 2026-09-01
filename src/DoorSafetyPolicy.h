@@ -30,6 +30,18 @@ constexpr bool shouldPollTofSensors(DoorState state)
   return state == DoorState::Closed || state == DoorState::Open || state == DoorState::Closing;
 }
 
+// Converts sensor and override inputs into the controller's requested position.
+// Homing and keep-closed are safety constraints and take precedence over opening.
+constexpr bool shouldRequestDoorOpen(DoorState state, bool sensorQualified,
+                                     bool keepOpen, bool keepClosed)
+{
+  if (state == DoorState::Homing || keepClosed)
+    return false;
+  if (keepOpen)
+    return true;
+  return sensorQualified;
+}
+
 // Only a positively established closed state is safe to report as closed.
 constexpr const char *binaryDoorState(DoorState state)
 {

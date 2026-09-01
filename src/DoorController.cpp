@@ -1,5 +1,6 @@
 #include "DoorController.h"
 #include "DoorSafetyPolicy.h"
+#include "MotionSafetyPolicy.h"
 #include "DisplayService.h"
 #include "StatusPixel.h"
 #include "mqtt.h"
@@ -279,24 +280,8 @@ void DoorController::processSensorUpdate(const TofSensorManager::UpdateResult &u
     }
   }
 
-  if (currentState == DoorState::Homing)
-  {
-    openDoor = false;
-    return;
-  }
-
-  if (keepClosed)
-  {
-    openDoor = false;
-  }
-  else if (keepOpen)
-  {
-    openDoor = true;
-  }
-  else
-  {
-    openDoor = update.anySensorQualified;
-  }
+  openDoor = shouldRequestDoorOpen(currentState, update.anySensorQualified,
+                                   keepOpen, keepClosed);
 }
 
 float DoorController::distanceCmForSensor(size_t index) const
@@ -592,7 +577,9 @@ void DoorController::handleOpenState()
     openStateEnteredMs = millis();
     return;
   }
-  if (millis() - openStateEnteredMs >= Config.timing.doorOpenHoldMs)
+  if (durationElapsed(static_cast<uint32_t>(millis()),
+                      static_cast<uint32_t>(openStateEnteredMs),
+                      static_cast<uint32_t>(Config.timing.doorOpenHoldMs)))
   {
     if (stepper)
     {
@@ -772,13 +759,14 @@ bool DoorController::motionLimitExceeded() const
   {
     return true;
   }
-  const int64_t travelled = static_cast<int64_t>(stepper->getCurrentPosition()) - motionStartedPosition;
-  const int64_t magnitude = travelled < 0 ? -travelled : travelled;
   const unsigned long timeout = stateMachine.current() == DoorState::Homing
                                     ? Config.stepper.maximumHomingMs
                                     : Config.stepper.maximumMotionMs;
-  return magnitude >= Config.stepper.maximumTravelSteps ||
-         millis() - motionStartedMs >= timeout;
+  return motionBoundsExceeded(stepper->getCurrentPosition(), motionStartedPosition,
+                              Config.stepper.maximumTravelSteps,
+                              static_cast<uint32_t>(millis()),
+                              static_cast<uint32_t>(motionStartedMs),
+                              static_cast<uint32_t>(timeout));
 }
 
 void DoorController::enterFault(const char *reason)

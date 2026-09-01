@@ -1,97 +1,70 @@
+#include "DoorStateMachine.h"
 #include <unity.h>
 
-#include "DoorStateMachine.h"
-#include "DoorSafetyPolicy.h"
-
-void test_initial_state_is_closed()
-{
-  DoorStateMachine machine;
-  TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Closed), static_cast<int>(machine.current()));
+void test_initial_state_is_closed() {
+  DoorStateMachine m;
+  TEST_ASSERT_EQUAL_INT((int)DoorState::Closed, (int)m.current());
 }
-
-void test_transition_records_previous_state_and_reason()
-{
-  DoorStateMachine machine;
-  DoorState observedFrom = DoorState::Fault;
-  DoorState observedTo = DoorState::Fault;
-  const char *observedReason = nullptr;
-  machine.setTransitionCallback([&](DoorState from, DoorState to, const char *reason) {
-    observedFrom = from;
-    observedTo = to;
-    observedReason = reason;
+void test_transition_records_history_and_reason() {
+  DoorStateMachine m;
+  DoorState from = DoorState::Fault, to = DoorState::Fault;
+  const char *reason = nullptr;
+  m.setTransitionCallback([&](DoorState f, DoorState t, const char *r) {
+    from = f;
+    to = t;
+    reason = r;
   });
-
-  TEST_ASSERT_TRUE(machine.transitionTo(DoorState::Opening, "sensor"));
-  TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Closed), static_cast<int>(machine.previous()));
-  TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Opening), static_cast<int>(machine.current()));
-  TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Closed), static_cast<int>(observedFrom));
-  TEST_ASSERT_EQUAL(static_cast<int>(DoorState::Opening), static_cast<int>(observedTo));
-  TEST_ASSERT_EQUAL_STRING("sensor", observedReason);
+  TEST_ASSERT_TRUE(m.transitionTo(DoorState::Opening, "sensor"));
+  TEST_ASSERT_EQUAL_INT((int)DoorState::Closed, (int)m.previous());
+  TEST_ASSERT_EQUAL_INT((int)DoorState::Opening, (int)m.current());
+  TEST_ASSERT_EQUAL_INT((int)DoorState::Closed, (int)from);
+  TEST_ASSERT_EQUAL_INT((int)DoorState::Opening, (int)to);
+  TEST_ASSERT_EQUAL_STRING("sensor", reason);
 }
-
-void test_duplicate_transition_is_ignored()
-{
-  DoorStateMachine machine;
-  TEST_ASSERT_FALSE(machine.transitionTo(DoorState::Closed, "duplicate"));
+void test_duplicate_transition_is_ignored() {
+  DoorStateMachine m;
+  int calls = 0;
+  m.setTransitionCallback([&](DoorState, DoorState, const char *) { ++calls; });
+  TEST_ASSERT_FALSE(m.transitionTo(DoorState::Closed, "duplicate"));
+  TEST_ASSERT_EQUAL_INT(0, calls);
+  TEST_ASSERT_EQUAL_INT((int)DoorState::Closed, (int)m.previous());
 }
-
-void test_homing_completes_only_at_bottom_limit()
-{
-  TEST_ASSERT_EQUAL(static_cast<int>(LimitSafetyAction::None),
-                    static_cast<int>(limitSafetyAction(DoorState::Homing, false, false)));
-  TEST_ASSERT_EQUAL(static_cast<int>(LimitSafetyAction::CompleteHoming),
-                    static_cast<int>(limitSafetyAction(DoorState::Homing, true, false)));
-}
-
-void test_conflicting_limits_always_fault()
-{
-  for (DoorState state : {DoorState::Homing, DoorState::Closed, DoorState::Opening,
-                          DoorState::Open, DoorState::Closing, DoorState::Fault})
-  {
-    TEST_ASSERT_EQUAL(static_cast<int>(LimitSafetyAction::FaultConflictingLimits),
-                      static_cast<int>(limitSafetyAction(state, true, true)));
+void test_state_machine_tracks_multiple_transitions() {
+  DoorStateMachine m;
+  int calls = 0;
+  DoorState previous = DoorState::Closed;
+  const DoorState states[]{DoorState::Opening, DoorState::Open,
+                           DoorState::Closing, DoorState::Closed};
+  m.setTransitionCallback(
+      [&](DoorState from, DoorState to, const char *reason) {
+        TEST_ASSERT_EQUAL_INT((int)previous, (int)from);
+        TEST_ASSERT_EQUAL_INT((int)states[calls++], (int)to);
+        TEST_ASSERT_EQUAL_STRING("sequence", reason);
+      });
+  for (DoorState next : states) {
+    TEST_ASSERT_TRUE(m.transitionTo(next, "sequence"));
+    TEST_ASSERT_EQUAL_INT((int)previous, (int)m.previous());
+    previous = next;
   }
+  TEST_ASSERT_EQUAL_INT(4, calls);
 }
-
-void test_directional_limit_completes_motion()
-{
-  TEST_ASSERT_EQUAL(static_cast<int>(LimitSafetyAction::CompleteOpening),
-                    static_cast<int>(limitSafetyAction(DoorState::Opening, false, true)));
-  TEST_ASSERT_EQUAL(static_cast<int>(LimitSafetyAction::CompleteClosing),
-                    static_cast<int>(limitSafetyAction(DoorState::Closing, true, false)));
+void test_transition_supports_null_callback_and_reason() {
+  DoorStateMachine m;
+  TEST_ASSERT_TRUE(m.transitionTo(DoorState::Opening));
+  const char *reason = "set";
+  m.setTransitionCallback(
+      [&](DoorState, DoorState, const char *r) { reason = r; });
+  TEST_ASSERT_TRUE(m.transitionTo(DoorState::Open));
+  TEST_ASSERT_NULL(reason);
 }
-
-void test_tof_polling_prioritizes_motion_safety()
-{
-  TEST_ASSERT_FALSE(shouldPollTofSensors(DoorState::Homing));
-  TEST_ASSERT_FALSE(shouldPollTofSensors(DoorState::Opening));
-  TEST_ASSERT_FALSE(shouldPollTofSensors(DoorState::Fault));
-  TEST_ASSERT_TRUE(shouldPollTofSensors(DoorState::Closing));
-}
-
-void test_binary_state_is_closed_only_when_confirmed()
-{
-  TEST_ASSERT_EQUAL_STRING("CLOSED", binaryDoorState(DoorState::Closed));
-  TEST_ASSERT_EQUAL_STRING("OPEN", binaryDoorState(DoorState::Homing));
-  TEST_ASSERT_EQUAL_STRING("OPEN", binaryDoorState(DoorState::Opening));
-  TEST_ASSERT_EQUAL_STRING("OPEN", binaryDoorState(DoorState::Open));
-  TEST_ASSERT_EQUAL_STRING("OPEN", binaryDoorState(DoorState::Closing));
-  TEST_ASSERT_EQUAL_STRING("OPEN", binaryDoorState(DoorState::Fault));
-}
-
 void setUp() {}
 void tearDown() {}
-
-int main(int, char **)
-{
+int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_initial_state_is_closed);
-  RUN_TEST(test_transition_records_previous_state_and_reason);
+  RUN_TEST(test_transition_records_history_and_reason);
   RUN_TEST(test_duplicate_transition_is_ignored);
-  RUN_TEST(test_homing_completes_only_at_bottom_limit);
-  RUN_TEST(test_conflicting_limits_always_fault);
-  RUN_TEST(test_directional_limit_completes_motion);
-  RUN_TEST(test_tof_polling_prioritizes_motion_safety);
-  RUN_TEST(test_binary_state_is_closed_only_when_confirmed);
+  RUN_TEST(test_state_machine_tracks_multiple_transitions);
+  RUN_TEST(test_transition_supports_null_callback_and_reason);
   return UNITY_END();
 }

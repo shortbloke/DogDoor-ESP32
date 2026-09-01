@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include "Config.h"
+#include "SensorQualification.h"
 
 class DisplayService;
 
@@ -46,10 +47,11 @@ private:
 
   std::array<VL53L0X, kSensorCount> sensors;
   std::array<bool, kSensorCount> sensorReady{{false, false}};
-  std::array<bool, kSensorCount> sensorBelowThreshold{{false, false}};
   std::array<uint16_t, kSensorCount> ranges{{0, 0}};
   std::array<unsigned long, kSensorCount> sensorStatusSuppressUntil{{0, 0}};
-  std::array<uint8_t, kSensorCount> sensorBelowStreak{{0, 0}};
+  std::array<SensorQualification, kSensorCount> qualification{
+    SensorQualification(Config.tof.consecutiveReadingsForTrigger),
+    SensorQualification(Config.tof.consecutiveReadingsForTrigger)};
   std::array<bool, kSensorCount> measurementOk{{false, false}};
 
   unsigned long lastSensorInitMs = 0;

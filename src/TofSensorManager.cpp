@@ -94,34 +94,22 @@ TofSensorManager::UpdateResult TofSensorManager::update()
     {
       publishSensorStatus(static_cast<uint8_t>(i), true, false);
       measurementOk[i] = true;
-      const bool below = reading <= Config.tof.maxConsideredDistanceMm &&
-                         reading < Config.tof.rangeThresholdMm[i];
-      if (!below)
+      const auto qualificationResult = qualification[i].update(
+        true, reading, Config.tof.rangeThresholdMm[i],
+        Config.tof.maxConsideredDistanceMm);
+      if (qualificationResult.triggered)
       {
-        resetMeasurementState(i);
-      }
-      else
-      {
-        uint8_t &streak = sensorBelowStreak[i];
-        if (streak < Config.tof.consecutiveReadingsForTrigger)
-        {
-          ++streak;
-        }
-        if (streak >= Config.tof.consecutiveReadingsForTrigger && !sensorBelowThreshold[i])
-        {
-          sensorBelowThreshold[i] = true;
-          result.triggerEvent = true;
-          result.triggerSensorId = static_cast<uint8_t>(i + 1);
-        }
+        result.triggerEvent = true;
+        result.triggerSensorId = static_cast<uint8_t>(i + 1);
       }
     }
   }
 
   nextSensorToPoll = (nextSensorToPoll + 1) % kSensorCount;
   result.anySensorQualified = false;
-  for (bool qualified : sensorBelowThreshold)
+  for (const auto &sensorQualification : qualification)
   {
-    result.anySensorQualified = result.anySensorQualified || qualified;
+    result.anySensorQualified = result.anySensorQualified || sensorQualification.qualified();
   }
 
   now = millis();
@@ -313,6 +301,5 @@ void TofSensorManager::publishSensorStatus(uint8_t sensorIndex, bool ok, bool re
 
 void TofSensorManager::resetMeasurementState(size_t index)
 {
-  sensorBelowThreshold[index] = false;
-  sensorBelowStreak[index] = 0;
+  qualification[index].reset();
 }
