@@ -123,7 +123,7 @@ static const char kDistanceTemplate[] PROGMEM =
 
 static const char kLimitTemplate[] PROGMEM =
   "{\"name\":\"Pet Door Limit %s\",\"unique_id\":\"pet_door_limit_%s\",\"device_class\":\"door\","
-  "\"state_topic\":\"%s\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"availability_topic\":\"%s\","
+  "\"state_topic\":\"%s\",\"payload_on\":\"OFF\",\"payload_off\":\"ON\",\"availability_topic\":\"%s\","
   "\"payload_available\":\"online\",\"payload_not_available\":\"offline\",\"device\":%s}";
 
 static const char kSensorTriggerTemplate[] PROGMEM =
