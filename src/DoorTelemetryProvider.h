@@ -14,4 +14,8 @@ public:
   virtual uint8_t getLastSensorTriggered() const = 0;
   virtual uint32_t getDoorOpenCount() const = 0;
   virtual uint32_t getSensorTriggerCount(size_t index) const = 0;
+  // Current remote override mode, as applied by the controller. May change
+  // without an MQTT command (e.g. the physical toggle returning to centre resets
+  // it to Auto), so the network layer polls this to keep the HA select in sync.
+  virtual OverrideMode getOverrideMode() const = 0;
 };

@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include "Config.h"
+#include "DoorCommandSink.h"
 #include "DoorStateMachine.h"
 #include "DoorTelemetryProvider.h"
 #include "TofSensorManager.h"
@@ -13,7 +14,7 @@ class DisplayService;
 class StatusPixel;
 
 // Controls the automated dog door hardware and logic.
-class DoorController : public DoorTelemetryProvider
+class DoorController : public DoorTelemetryProvider, public DoorCommandSink
 {
 public:
   DoorController(StatusPixel &pixel, DisplayService &display, TofSensorManager &sensors);
@@ -46,6 +47,12 @@ public:
 
   uint8_t getLastSensorTriggered() const override;
 
+  OverrideMode getOverrideMode() const override { return mqttOverrideMode; }
+
+  // Records a remote override request (MQTT). Applied in checkOverrideSwitches()
+  // only while no physical override switch is engaged.
+  void setOverrideCommand(OverrideMode mode) override;
+
   // Update WiFi connection status for display
   void setWiFiConnected(bool connected);
 
@@ -62,6 +69,9 @@ private:
   // Sensor and state helpers
   void processSensorUpdate(const TofSensorManager::UpdateResult &update);
   void checkOverrideSwitches();
+  // Drives keep-open/keep-closed edges from the combined (physical + remote)
+  // override request. The two desired flags are mutually exclusive.
+  void applyOverrideState(bool desiredKeepOpen, bool desiredKeepClosed);
   void handleState();
   void showStateOnDisplay();
   void handleStateTransition(DoorState from, DoorState to, const char *reason);
@@ -100,6 +110,12 @@ private:
   bool openDoor = false;
   bool keepClosed = false;
   bool keepOpen = false;
+  // Latest remote override request. Physical switches override it; defaults to
+  // Auto on boot so a reboot always resumes sensor control.
+  OverrideMode mqttOverrideMode = OverrideMode::Auto;
+  // Tracks whether a physical override switch was engaged last loop, so a return
+  // to the centre (off) position can reset the MQTT override back to Auto.
+  bool physicalOverrideWasActive = false;
   bool displayedSeekTopHint = false;
   bool displayedSeekBottomHint = false;
   DoorStateMachine stateMachine;

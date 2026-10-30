@@ -372,6 +372,14 @@ void DoorController::persistCountersIfStationary()
   }
 }
 
+void DoorController::setOverrideCommand(OverrideMode mode)
+{
+  // Only record the request here; it may arrive from the MQTT callback outside
+  // the door loop. checkOverrideSwitches() applies it on the next iteration so
+  // every motion decision still happens in one place.
+  mqttOverrideMode = mode;
+}
+
 void DoorController::checkOverrideSwitches()
 {
   if (stateMachine.current() == DoorState::Homing)
@@ -379,9 +387,9 @@ void DoorController::checkOverrideSwitches()
     return;
   }
 
-  const bool keepOpenActive = digitalRead(Config.overrides.keepOpenPin) == HIGH;
-  const bool keepClosedActive = digitalRead(Config.overrides.keepClosedPin) == HIGH;
-  if (keepOpenActive && keepClosedActive)
+  const bool physKeepOpen = digitalRead(Config.overrides.keepOpenPin) == HIGH;
+  const bool physKeepClosed = digitalRead(Config.overrides.keepClosedPin) == HIGH;
+  if (physKeepOpen && physKeepClosed)
   {
     if (!overrideConflict)
     {
@@ -391,21 +399,48 @@ void DoorController::checkOverrideSwitches()
     return;
   }
   overrideConflict = false;
-  if (keepOpenActive && !keepOpen)
+
+  // Returning the 3-position toggle to its centre (off) position clears any
+  // active MQTT override, so centre-off always means Auto. Operating the physical
+  // switch therefore takes control back from Home Assistant.
+  const bool physicalOverrideActive = physKeepOpen || physKeepClosed;
+  if (physicalOverrideWasActive && !physicalOverrideActive)
+  {
+    mqttOverrideMode = OverrideMode::Auto;
+  }
+  physicalOverrideWasActive = physicalOverrideActive;
+
+  // Hardwired override switches are the master control. The remote (MQTT)
+  // override only takes effect when neither physical switch is engaged, so a
+  // local switch can never be overridden from Home Assistant.
+  bool desiredKeepOpen = physKeepOpen;
+  bool desiredKeepClosed = physKeepClosed;
+  if (!physicalOverrideActive)
+  {
+    desiredKeepOpen = (mqttOverrideMode == OverrideMode::KeepOpen);
+    desiredKeepClosed = (mqttOverrideMode == OverrideMode::KeepClosed);
+  }
+
+  applyOverrideState(desiredKeepOpen, desiredKeepClosed);
+}
+
+void DoorController::applyOverrideState(bool desiredKeepOpen, bool desiredKeepClosed)
+{
+  if (desiredKeepOpen && !keepOpen)
   {
     openDoor = true;
     keepOpen = true;
-    SERIAL_PRINT("Override keep open switch activated. Door will remain open.\n");
+    SERIAL_PRINT("Keep-open override engaged. Door will remain open.\n");
   }
-  else if (!keepOpenActive && keepOpen)
+  else if (!desiredKeepOpen && keepOpen)
   {
     keepOpen = false;
     openDoor = false;
     startClosing("Keep-open deactivated");
-    SERIAL_PRINT("Override keep open switch deactivated. Resuming normal operation.\n");
+    SERIAL_PRINT("Keep-open override released. Resuming normal operation.\n");
   }
 
-  if (keepClosedActive && !keepClosed)
+  if (desiredKeepClosed && !keepClosed)
   {
     openDoor = false;
     keepClosed = true;
@@ -414,14 +449,14 @@ void DoorController::checkOverrideSwitches()
       startClosing("Keep-closed engaged");
     }
     showStateOnDisplay();
-    SERIAL_PRINT("Override keep closed switch activated. Door will remain closed.\n");
+    SERIAL_PRINT("Keep-closed override engaged. Door will remain closed.\n");
   }
-  else if (!keepClosedActive && keepClosed)
+  else if (!desiredKeepClosed && keepClosed)
   {
     keepClosed = false;
     handleState();
     showStateOnDisplay();
-    SERIAL_PRINT("Override keep closed switch deactivated. Resuming normal operation.\n");
+    SERIAL_PRINT("Keep-closed override released. Resuming normal operation.\n");
   }
 }
 

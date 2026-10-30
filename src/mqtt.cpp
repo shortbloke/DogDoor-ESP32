@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <strings.h>
 #include <pgmspace.h>
 #include "Secrets.h"
 #include "DisplayService.h"
@@ -35,8 +36,16 @@ constexpr std::array<const char *, TofSensorConfig::count> kTopicSensorTriggerCo
   "pet_door/sensor/indoor_count", "pet_door/sensor/outdoor_count"};
 constexpr char kTopicAvailability[] = "pet_door/status";  // LWT + availability
 constexpr char kTopicDoorOpenCount[] = "pet_door/door/open_count";
+constexpr char kTopicModeSet[] = "pet_door/mode/set";      // HA select command
+constexpr char kTopicModeState[] = "pet_door/mode/state";  // HA select state
 constexpr char kTofStatusPayloadOk[] = "OK";
 constexpr char kTofStatusPayloadError[] = "ERROR";
+
+// MQTT override select payloads. These double as the Home Assistant select
+// option labels, so the command/state payloads match the options verbatim.
+constexpr char kModePayloadAuto[] = "Auto";
+constexpr char kModePayloadKeepOpen[] = "Keep Open";
+constexpr char kModePayloadKeepClosed[] = "Keep Closed";
 
 // Home Assistant discovery prefix & topics (component/node_id/object_id/config)
 constexpr char kDiscoveryPrefix[] = "homeassistant";
@@ -53,12 +62,20 @@ constexpr std::array<const char *, TofSensorConfig::count> kDiscoverySensorTrigg
   "homeassistant/sensor/pet_door/indoor_trigger_count/config",
   "homeassistant/sensor/pet_door/outdoor_trigger_count/config"};
 constexpr char kDiscoveryDoorOpenCountConfig[] = "homeassistant/sensor/pet_door/door_open_count/config";
+constexpr char kDiscoveryModeConfig[] = "homeassistant/select/pet_door/mode/config";
 
 // ---------- Internal State ----------
 static WiFiClient wifiClient;
 static PubSubClient mqttClient(wifiClient);
 static DoorTelemetryProvider *telemetry = nullptr;
+static DoorCommandSink *commandSink = nullptr;
 static DisplayService *display = nullptr;
+
+// Last override mode published to the HA select, cached for change detection.
+// The controller owns the authoritative mode (see getOverrideMode); we poll it
+// so a physical-switch reset to Auto is reflected in Home Assistant too.
+static OverrideMode lastOverrideMode = OverrideMode::Auto;
+static bool overrideModeValid = false;
 
 static bool discoveryPublished = false;
 static bool legacyDiscoveryCleared = false;
@@ -136,6 +153,14 @@ static const char kDoorOpenCountTemplate[] PROGMEM =
   "\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
   "\"state_class\":\"total_increasing\",\"unit_of_measurement\":\"count\",\"icon\":\"mdi:counter\",\"device\":%s}";
 
+// Home Assistant select: Auto / Keep Open / Keep Closed. The option labels must
+// match kModePayload* so the command payload round-trips through the state topic.
+static const char kModeTemplate[] PROGMEM =
+  "{\"name\":\"Pet Door Mode\",\"unique_id\":\"pet_door_mode\",\"command_topic\":\"%s\","
+  "\"state_topic\":\"%s\",\"options\":[\"Auto\",\"Keep Open\",\"Keep Closed\"],"
+  "\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
+  "\"icon\":\"mdi:dog-side\",\"device\":%s}";
+
 static const char kSensorTriggerCountTemplate[] PROGMEM =
   "{\"name\":\"Pet Door %s Trigger Count\",\"unique_id\":\"pet_door_%s_trigger_count\",\"state_topic\":\"%s\","
   "\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
@@ -160,6 +185,7 @@ struct DiscoveryPayloadCache {
   char limitTop[kDiscoveryPayloadBufferSize];
   char sensorTrigger[kDiscoveryPayloadBufferSize];
   char doorOpenCount[kDiscoveryPayloadBufferSize];
+  char mode[kDiscoveryPayloadBufferSize];
   std::array<std::array<char, kDiscoveryPayloadBufferSize>, TofSensorConfig::count> sensorTriggerCounts{};
   std::array<std::array<char, kDiscoveryPayloadBufferSize>, TofSensorConfig::count> tofStatus{};
   std::array<std::array<char, kDiscoveryPayloadBufferSize>, TofSensorConfig::count> tofInit{};
@@ -294,6 +320,15 @@ static void ensureDiscoveryPayloads() {
     sizeof(discoveryPayloads.doorOpenCount),
     kDoorOpenCountTemplate,
     kTopicDoorOpenCount,
+    kTopicAvailability,
+    deviceJson);
+
+  formatDiscoveryJson(
+    discoveryPayloads.mode,
+    sizeof(discoveryPayloads.mode),
+    kModeTemplate,
+    kTopicModeSet,
+    kTopicModeState,
     kTopicAvailability,
     deviceJson);
 
@@ -508,6 +543,75 @@ void mqttPublishTOFInit(uint8_t sensorIndex) {
   publishTofInitCount(sensorIndex);
 }
 
+// ---------- Override mode (MQTT command) ----------
+static const char *overrideModeToPayload(OverrideMode mode) {
+  switch (mode) {
+    case OverrideMode::KeepOpen:   return kModePayloadKeepOpen;
+    case OverrideMode::KeepClosed: return kModePayloadKeepClosed;
+    case OverrideMode::Auto:
+    default:                       return kModePayloadAuto;
+  }
+}
+
+// Accepts the Home Assistant select labels plus a few shorthand aliases so the
+// topic is also convenient to drive from the CLI (e.g. mosquitto_pub).
+static bool parseOverrideMode(const char *payload, OverrideMode &mode) {
+  if (strcasecmp(payload, kModePayloadAuto) == 0) {
+    mode = OverrideMode::Auto;
+    return true;
+  }
+  if (strcasecmp(payload, kModePayloadKeepOpen) == 0 ||
+      strcasecmp(payload, "OPEN") == 0 || strcasecmp(payload, "KEEP_OPEN") == 0) {
+    mode = OverrideMode::KeepOpen;
+    return true;
+  }
+  if (strcasecmp(payload, kModePayloadKeepClosed) == 0 ||
+      strcasecmp(payload, "CLOSED") == 0 || strcasecmp(payload, "KEEP_CLOSED") == 0) {
+    mode = OverrideMode::KeepClosed;
+    return true;
+  }
+  return false;
+}
+
+// Publishes the controller's current mode to the HA select when it changes.
+// Covers both MQTT commands and physical-switch resets to Auto.
+static void publishOverrideModeIfChanged() {
+  if (!telemetry) {
+    return;
+  }
+  const OverrideMode mode = telemetry->getOverrideMode();
+  if (overrideModeValid && mode == lastOverrideMode) {
+    return;
+  }
+  if (publishRetained(kTopicModeState, overrideModeToPayload(mode))) {
+    lastOverrideMode = mode;
+    overrideModeValid = true;
+  }
+}
+
+// Runs inside mqttClient.loop(); only records the request. The door controller
+// applies it from its own loop, keeping motion decisions in one place, and
+// publishOverrideModeIfChanged() reports the resulting state.
+static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
+  if (std::strcmp(topic, kTopicModeSet) != 0) {
+    return;
+  }
+  char buffer[24];
+  const unsigned int copyLen = length < sizeof(buffer) - 1 ? length : sizeof(buffer) - 1;
+  std::memcpy(buffer, payload, copyLen);
+  buffer[copyLen] = '\0';
+
+  OverrideMode mode;
+  if (!parseOverrideMode(buffer, mode)) {
+    SERIAL_PRINT("[MQTT] Ignoring unknown mode command '%s'\n", buffer);
+    return;
+  }
+  if (commandSink) {
+    commandSink->setOverrideCommand(mode);
+  }
+  SERIAL_PRINT("[MQTT] Override mode command: %s\n", overrideModeToPayload(mode));
+}
+
 // Home Assistant discovery payloads
 static void publishDiscovery() {
   if (!mqttClient.connected()) return;
@@ -535,6 +639,7 @@ static void publishDiscovery() {
   ok &= publishIfChanged(kDiscoveryLimitTopConfig, discoveryPayloads.limitTop, publishedPayloads.limitTop);
   ok &= publishIfChanged(kDiscoverySensorTriggerConfig, discoveryPayloads.sensorTrigger, publishedPayloads.sensorTrigger);
   ok &= publishIfChanged(kDiscoveryDoorOpenCountConfig, discoveryPayloads.doorOpenCount, publishedPayloads.doorOpenCount);
+  ok &= publishIfChanged(kDiscoveryModeConfig, discoveryPayloads.mode, publishedPayloads.mode);
 
   for (size_t i = 0; i < Config.tof.count; ++i) {
     ok &= publishIfChanged(kDiscoverySensorTriggerCountConfigs[i], discoveryPayloads.sensorTriggerCounts[i].data(), publishedPayloads.sensorTriggerCounts[i].data());
@@ -615,6 +720,13 @@ static void mqttReconnect() {
       publishDiscovery();
     }
 
+    // Clear any stale retained command so a power cycle always resumes in the
+    // mode we boot with, then subscribe for new commands and report state.
+    publishRetained(kTopicModeSet, "");
+    mqttClient.subscribe(kTopicModeSet);
+    overrideModeValid = false;
+    publishOverrideModeIfChanged();
+
     const char *label = telemetry ? telemetry->getDoorStateString() : nullptr;
     const DoorState state = telemetry ? telemetry->getDoorState() : DoorState::Fault;
     uint8_t triggerId = telemetry ? telemetry->getLastSensorTriggered() : 0;
@@ -674,12 +786,16 @@ static void mqttReconnect() {
 }
 
 // ---------- Public API ----------
-void mqttSetup(DoorTelemetryProvider *provider, DisplayService *displayService) {
+void mqttSetup(DoorTelemetryProvider *provider, DoorCommandSink *sink, DisplayService *displayService) {
   ensureTofTopicsInitialized();
   resetTofStatusCaches();
   discoveryPayloads.initialised = false;
   telemetry = provider;
+  commandSink = sink;
   display = displayService;
+  // The controller already boots in Auto; force a state publish on next connect.
+  overrideModeValid = false;
+  mqttClient.setCallback(onMqttMessage);
   discoveryPublished = false;
   legacyDiscoveryCleared = false;
   lastDoorStateValid = false;
@@ -736,6 +852,7 @@ void mqttLoop() {
         sensorTriggerCountValid[i] = true;
       }
     }
+    publishOverrideModeIfChanged();
   }
   // Periodic distance publish
   unsigned long now = millis();

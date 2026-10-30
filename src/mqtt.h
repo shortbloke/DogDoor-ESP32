@@ -1,10 +1,11 @@
 #pragma once
 #include <Arduino.h>
+#include "DoorCommandSink.h"
 #include "DoorTelemetryProvider.h"
 
 class DisplayService;
 
-void mqttSetup(DoorTelemetryProvider *provider, DisplayService *displayService);
+void mqttSetup(DoorTelemetryProvider *provider, DoorCommandSink *commandSink, DisplayService *displayService);
 void mqttLoop();
 
 void mqttPublishDoorState(DoorState state, const char *label);

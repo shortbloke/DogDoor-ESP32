@@ -39,7 +39,7 @@ void AppContainer::begin()
   statusPixel.setColor(255, 0, 0);
   door.setup();
 
-  mqttSetup(&door, &displayService);  // connection handled in loop
+  mqttSetup(&door, &door, &displayService);  // connection handled in loop
 
   statusPixel.setColor(0, 255, 0);
 

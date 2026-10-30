@@ -91,6 +91,17 @@ enum class DoorState
   Fault
 };
 
+// --- MQTT Override Mode ---
+// Remote (MQTT) override request. Physical override switches always take
+// precedence; a mode other than Auto applies only when no physical override is
+// engaged. Auto hands control back to the ToF sensors.
+enum class OverrideMode
+{
+  Auto,
+  KeepOpen,
+  KeepClosed
+};
+
 // --- Limit Switch Enum ---
 enum LimitSwitch
 {
